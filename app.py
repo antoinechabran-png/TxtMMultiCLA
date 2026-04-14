@@ -51,14 +51,13 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
     custom_stops_set = set([str(x).strip().lower() for x in custom_stops])
 
     # FIX 1: Include negation_list and superlative_list words in gram_influencers
-    # so they survive stopword filtering and can form grams properly
+    # so they survive stopword filtering and can form grams properly.
     gram_influencers = set(
         gram_rules['prefix_2g'] +
         gram_rules['suffix_2g'] +
         [w for phrase in gram_rules['prefix_3g'] for w in phrase.split()] +
         [w for phrase in gram_rules['spec_2g'] for w in phrase.split()] +
         [w for phrase in gram_rules['spec_3g'] for w in phrase.split()] +
-        # ADDED: protect negation and superlative seed words from being dropped
         [w for phrase in gram_rules['negation_list'] for w in phrase.split()] +
         [w for phrase in gram_rules['superlative_list'] for w in phrase.split()]
     )
@@ -132,20 +131,16 @@ def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
     neg_captured = []
     sup_captured = []
 
-    # Normalize prefixes to underscore form for consistent matching
     neg_p = [p.strip().lower().replace(" ", "_") for p in negation_prefixes]
     sup_p = [p.strip().lower().replace(" ", "_") for p in superlative_prefixes]
 
     for w in set(words):
         if "_" in w:
-            # Gram token: check if it starts with any negation prefix
             if any(w.startswith(p + "_") or w == p for p in neg_p):
                 neg_captured.append(w.replace("_", " "))
-            # Only check superlative if not already a negation gram
             elif any(w.startswith(p + "_") or w == p for p in sup_p):
                 sup_captured.append(w.replace("_", " "))
         else:
-            # Single-word token: check direct membership in prefix lists
             if w in neg_p:
                 neg_captured.append(w)
             elif w in sup_p:
@@ -158,7 +153,6 @@ def generate_word_cloud(text_series, palette, shape):
     FIX 3: Replace underscores with spaces before rendering so gram tokens
     like 'not_fresh' display as 'not fresh' in the word cloud.
     """
-    # Convert underscored gram tokens to spaced phrases for display
     display_series = text_series.str.replace("_", " ", regex=False)
     combined_text = " ".join(display_series).strip()
     if not combined_text:
@@ -241,11 +235,17 @@ with st.sidebar:
 if 'gram_rules' not in st.session_state:
     st.session_state.gram_rules = {
         'prefix_2g': ["not", "too", "very", "real", "really", "enough", "because", "if", "less", "more", "little", "lot", "all", "so", "just", "quite", "many"],
-        'suffix_2g': ["not", "too", "very", "real", "really", "enough", "because", "if", "less", "more", "little", "lot", "all", "so", "quite"],
+        # FIX 4 — ROOT CAUSE OF THE BUG:
+        # The old suffix_2g contained "not", "very", "too", "so", etc. — words that are
+        # ALSO in prefix_2g. This caused the token BEFORE "not" to greedily consume it
+        # as a suffix bigram (e.g. "smell" + "not" → "smell_not"), so "not" was never
+        # available to form "not_fresh" afterward. Fresh was then left stranded alone.
+        # suffix_2g must ONLY contain genuine terminators: words that make sense as the
+        # SECOND element of a gram but should never start one.
+        'suffix_2g': ["enough", "because", "if"],
         'prefix_3g': ["not too", "not very", "not real", "not enough"],
         'spec_2g': ["lily valley", "funeral flower", "white flower", "old fashion", "old people", "old lady", "house cleaner", "not fresh", "not clean"],
         'spec_3g': ["not smell good", "smell very good", "not smell bad", "smell very bad"],
-        # Lists used for categorising gram descriptors in the summary panels
         'negation_list': ["not", "not too", "less", "little", "not very", "not at all"],
         'superlative_list': ["really", "very", "enough", "quite", "many", "just", "more", "real", "so", "too", "too much"]
     }
@@ -283,7 +283,7 @@ if uploaded_file and 'df_raw' in locals():
                 tv_mtx = tv.fit_transform([full_text])
                 tfidf = dict(zip(tv.get_feature_names_out(), tv_mtx.toarray()[0]))
 
-                export_df = pd.DataFrame({"Word": counts.keys(),"Unweighted Frequency": counts.values(),"Weighted (TF-IDF) Frequency": [tfidf[w] for w in counts.keys()]}).sort_values(by="Unweighted Frequency", ascending=False)
+                export_df = pd.DataFrame({"Word": counts.keys(), "Unweighted Frequency": counts.values(), "Weighted (TF-IDF) Frequency": [tfidf[w] for w in counts.keys()]}).sort_values(by="Unweighted Frequency", ascending=False)
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     export_df.to_excel(writer, index=False, sheet_name='Word Frequencies')
@@ -294,7 +294,6 @@ if uploaded_file and 'df_raw' in locals():
             st.progress((sent_val + 1) / 2)
             c1, c2 = st.columns(2)
             with c1:
-                # FIX 3 applied here: underscores replaced inside generate_word_cloud
                 st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
             with c2:
                 tree_fig = generate_word_tree(p_sub_cleaned, fmin_global, palette_opt)
@@ -312,7 +311,6 @@ if uploaded_file and 'df_raw' in locals():
                 for w, s in neg_words: st.write(f"- {w.replace('_', ' ')}")
 
             # Row 2: Gram Categories (Negation & Superlative)
-            # FIX 2 applied: get_gram_categories now correctly matches prefixes
             neg_grams, sup_grams = get_gram_categories(
                 p_sub_cleaned,
                 st.session_state.gram_rules['negation_list'],
@@ -330,7 +328,6 @@ if uploaded_file and 'df_raw' in locals():
                     for g in sup_grams: st.write(f"- {g}")
                 else: st.write("No superlatives found.")
 
-        # --- Remaining tabs ---
         with tab2:
             st.subheader("⚔️ Scent Comparison")
             comp_cols = st.columns(2)
@@ -442,3 +439,4 @@ with tab5:
             'superlative_list': [x.strip().lower() for x in gs_list.split(",") if x.strip()]
         }
         st.rerun()
+
