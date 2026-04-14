@@ -82,7 +82,6 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
     i = 0
     while i < len(tokens):
         match_found = False
-        # Try 3-grams first
         if i < len(tokens) - 2:
             trigram_raw = f"{tokens[i]} {tokens[i+1]} {tokens[i+2]}"
             prefix_2g_part = f"{tokens[i]} {tokens[i+1]}"
@@ -91,7 +90,6 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
                 i += 3
                 match_found = True
         
-        # Try 2-grams
         if not match_found and i < len(tokens) - 1:
             bigram_raw = f"{tokens[i]} {tokens[i+1]}"
             if (bigram_raw in gram_rules['spec_2g'] or
@@ -121,30 +119,29 @@ def get_sentiment_words(text_series):
     neg = sorted([x for x in scored if x[1] < -0.1], key=lambda x: x[1])[:10]
     return pos, neg
 
+# --- FIX: IMPROVED CATEGORY DETECTION ---
 def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
     words = " ".join(text_series).split()
     neg_captured = []
     sup_captured = []
 
-    neg_p = [p.strip().lower().replace(" ", "_") for p in negation_prefixes]
-    sup_p = [p.strip().lower().replace(" ", "_") for p in superlative_prefixes]
+    # Prepare search terms (both space and underscore versions)
+    neg_terms = [p.strip().lower() for p in negation_prefixes]
+    sup_terms = [p.strip().lower() for p in superlative_prefixes]
 
     for w in set(words):
-        if "_" in w:
-            if any(w.startswith(p + "_") or w == p for p in neg_p):
-                neg_captured.append(w.replace("_", " "))
-            elif any(w.startswith(p + "_") or w == p for p in sup_p):
-                sup_captured.append(w.replace("_", " "))
-        else:
-            if w in neg_p:
-                neg_captured.append(w)
-            elif w in sup_p:
-                sup_captured.append(w)
+        clean_w = w.replace("_", " ")
+        
+        # Check if the word or any part of the gram contains a negation term
+        if any(term == clean_w or clean_w.startswith(term + " ") for term in neg_terms):
+            neg_captured.append(clean_w)
+        # Check for superlative terms
+        elif any(term == clean_w or clean_w.startswith(term + " ") for term in sup_terms):
+            sup_captured.append(clean_w)
 
     return sorted(list(set(neg_captured)))[:10], sorted(list(set(sup_captured)))[:10]
 
 def generate_word_cloud(text_series, palette, shape):
-    # Keep underscores for the WordCloud generator but use a Regex to keep them linked
     combined_text = " ".join(text_series).strip()
     if not combined_text:
         fig, ax = plt.subplots(); ax.text(0.5, 0.5, "No text available", ha='center'); ax.axis("off")
@@ -155,7 +152,6 @@ def generate_word_cloud(text_series, palette, shape):
         img = Image.new("L", (800, 800), 255)
         draw = ImageDraw.Draw(img); draw.ellipse((20,20,780,780), fill=0); mask = np.array(img)
     
-    # FIX: regexp=r"\S+" ensures underscores are treated as part of the word
     wc = WordCloud(
         background_color="white", 
         colormap=palette, 
@@ -173,7 +169,6 @@ def generate_word_tree(text_series, min_freq, palette):
     valid = [t for t in text_series if len(t.split()) > 0]
     if not valid: return None
     try:
-        # Use custom pattern to respect underscores
         vec = CountVectorizer(min_df=min_freq, token_pattern=r"(?u)\b\S+\b")
         mtx = vec.fit_transform(valid); words = vec.get_feature_names_out()
         if len(words) < 2: return None
@@ -203,7 +198,6 @@ def run_fca(df, p_col, fmin, use_tfidf):
 # --- UI Setup ---
 if 'gram_rules' not in st.session_state:
     st.session_state.gram_rules = {
-        # FIX: "not" and "very" removed from suffix to prevent greedy backward-merging
         'prefix_2g': ["not", "too", "very", "real", "really", "enough", "less", "more", "little", "lot", "so", "just", "quite", "many", "no"],
         'suffix_2g': ["enough", "away"], 
         'prefix_3g': ["not too", "not very", "not real", "not enough"],
@@ -273,7 +267,6 @@ if uploaded_file and 'df_raw' in locals():
 
             if not p_sub_cleaned.empty:
                 full_text = " ".join(p_sub_cleaned)
-                # FIX: CountVectorizer must respect underscores here
                 cv = CountVectorizer(token_pattern=r"(?u)\b\S+\b")
                 cv_mtx = cv.fit_transform([full_text])
                 counts = dict(zip(cv.get_feature_names_out(), cv_mtx.toarray()[0]))
@@ -312,10 +305,14 @@ if uploaded_file and 'df_raw' in locals():
             l2, r2 = st.columns(2)
             with l2:
                 st.warning("🚫 **Negation Grams**")
-                for g in neg_grams: st.write(f"- {g}")
+                if neg_grams:
+                    for g in neg_grams: st.write(f"- {g}")
+                else: st.write("None detected.")
             with r2:
                 st.info("💎 **Superlatives**")
-                for g in sup_grams: st.write(f"- {g}")
+                if sup_grams:
+                    for g in sup_grams: st.write(f"- {g}")
+                else: st.write("None detected.")
 
         with tab2:
             st.subheader("⚔️ Scent Comparison")
@@ -411,4 +408,3 @@ with tab5:
             'superlative_list': [x.strip().lower() for x in gs_list.split(",") if x.strip()]
         }
         st.rerun()
-
