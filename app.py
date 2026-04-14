@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from textblob import TextBlob
 import io
+from collections import Counter
 
 # Page Config
 st.set_page_config(page_title="Fragrance Verbatim Lab Pro", layout="wide", page_icon="🧪")
@@ -119,31 +120,37 @@ def get_sentiment_words(text_series):
     neg = sorted([x for x in scored if x[1] < -0.1], key=lambda x: x[1])[:10]
     return pos, neg
 
-# --- DECOUPLED RADAR LOGIC ---
+# --- UPDATED: Gram Output Matching Logic ---
 def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
-    # We use the raw "cleaned" series to catch even N=1 occurrences
-    all_words = " ".join(text_series).split()
-    if not all_words: return [], []
+    # Flatten all tokens to count frequency
+    all_tokens = " ".join(text_series).split()
+    if not all_tokens: return [], []
+    
+    counts = Counter(all_tokens)
     
     neg_captured = []
     sup_captured = []
 
-    # Flatten inputs to get individual keywords that trigger the category
-    neg_triggers = set([w for phrase in negation_prefixes for w in phrase.lower().split()])
-    sup_triggers = set([w for phrase in superlative_prefixes for w in phrase.lower().split()])
+    # Map prefixes to sets for faster lookup
+    neg_triggers = set([w.lower() for phrase in negation_prefixes for w in phrase.split()])
+    sup_triggers = set([w.lower() for phrase in superlative_prefixes for w in phrase.split()])
 
-    # Look at every unique word/gram found in the data, regardless of global threshold
-    for w in set(all_words):
-        gram_parts = w.lower().split("_")
-        display_w = w.replace("_", " ")
-        
-        # Capture if ANY part of the gram matches a trigger
-        if any(part in neg_triggers for part in gram_parts):
-            neg_captured.append(display_w)
-        elif any(part in sup_triggers for part in gram_parts):
-            sup_captured.append(display_w)
+    for token, freq in counts.items():
+        # Only analyze items that are grams (contain underscores)
+        if "_" in token:
+            parts = token.lower().split("_")
+            
+            # If the FIRST part of the gram is in your lists, categorize it
+            if parts[0] in neg_triggers:
+                neg_captured.append((token, freq))
+            elif parts[0] in sup_triggers:
+                sup_captured.append((token, freq))
+    
+    # Sort by frequency (descending) and take top 10
+    top_neg = [item[0] for item in sorted(neg_captured, key=lambda x: x[1], reverse=True)[:10]]
+    top_sup = [item[0] for item in sorted(sup_captured, key=lambda x: x[1], reverse=True)[:10]]
 
-    return sorted(list(set(neg_captured)))[:15], sorted(list(set(sup_captured)))[:15]
+    return top_neg, top_sup
 
 def generate_word_cloud(text_series, palette, shape):
     combined_text = " ".join(text_series).strip()
@@ -274,7 +281,7 @@ if uploaded_file and 'df_raw' in locals():
             st.metric(f"Target Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
             st.progress((sent_val + 1) / 2)
             
-            # Cloud & Tree (Filtered by Frequency Slider)
+            # Visuals
             c1, c2 = st.columns(2)
             with c1:
                 st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
@@ -283,32 +290,23 @@ if uploaded_file and 'df_raw' in locals():
                 if tree_fig: st.pyplot(tree_fig)
                 else: st.warning("Not enough patterns.")
 
-            # Sentiment Descriptors
-            pos_words, neg_words = get_sentiment_words(p_sub_cleaned)
-            l, r = st.columns(2)
-            with l:
-                st.success("✨ **Positive Descriptors**")
-                for w, s in pos_words: st.write(f"- {w.replace('_', ' ')}")
-            with r:
-                st.error("⚠️ **Negative Descriptors**")
-                for w, s in neg_words: st.write(f"- {w.replace('_', ' ')}")
-
-            # Gram Radar (DECOUPLED - catches low frequency)
+            # Gram Radar (MATCHES CLOUD OUTPUT FORMAT)
             neg_grams, sup_grams = get_gram_categories(p_sub_cleaned, st.session_state.gram_rules['negation_list'], st.session_state.gram_rules['superlative_list'])
             st.divider()
-            st.markdown("🔍 **Deep Radar (Includes low-frequency nuances below cloud threshold)**")
+            st.markdown("🔍 **Top Detections (Raw Output Tokens)**")
             l2, r2 = st.columns(2)
             with l2:
-                st.warning("🚫 **Negation Grams**")
+                st.warning("🚫 **Negation List (Top 10)**")
                 if neg_grams:
                     for g in neg_grams: st.write(f"- {g}")
-                else: st.write("None detected.")
+                else: st.write("No negations detected.")
             with r2:
-                st.info("💎 **Superlatives**")
+                st.info("💎 **Superlative List (Top 10)**")
                 if sup_grams:
                     for g in sup_grams: st.write(f"- {g}")
-                else: st.write("None detected.")
+                else: st.write("No superlatives detected.")
 
+        # Tab 2, 3, 4, 6 remain standard...
         with tab2:
             st.subheader("⚔️ Scent Comparison")
             comp_cols = st.columns(2)
@@ -380,8 +378,8 @@ with tab5:
         st.markdown("### 🛑 Word Exclusions")
         stops = st.session_state.get('custom_stop_list', [])
         txt_stops = st.text_area("Stopwords (comma separated)", value=", ".join(stops), height=150)
-        gn_list = st.text_input("Grams Negation for Lists", ", ".join(st.session_state.gram_rules['negation_list']))
-        gs_list = st.text_input("Grams Superlative for Lists", ", ".join(st.session_state.gram_rules['superlative_list']))
+        gn_list = st.text_input("Grams Negation Triggers", ", ".join(st.session_state.gram_rules['negation_list']))
+        gs_list = st.text_input("Grams Superlative Triggers", ", ".join(st.session_state.gram_rules['superlative_list']))
     with col_right:
         st.markdown("### 🔗 Gram Dictionary")
         g = st.session_state.gram_rules
