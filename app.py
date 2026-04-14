@@ -119,24 +119,26 @@ def get_sentiment_words(text_series):
     neg = sorted([x for x in scored if x[1] < -0.1], key=lambda x: x[1])[:10]
     return pos, neg
 
-# --- FIX APPLIED HERE ---
+# --- IMPROVED ROBUST DETECTION ---
 def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
     words = " ".join(text_series).split()
     neg_captured = []
     sup_captured = []
 
-    neg_terms = [p.strip().lower() for p in negation_prefixes]
-    sup_terms = [p.strip().lower() for p in superlative_prefixes]
+    # Flatten inputs to get individual keywords that trigger the category
+    neg_triggers = set([w for phrase in negation_prefixes for w in phrase.lower().split()])
+    sup_triggers = set([w for phrase in superlative_prefixes for w in phrase.lower().split()])
 
     for w in set(words):
-        clean_w = w.replace("_", " ")
-        parts = clean_w.split()
+        # Handle underscored tokens
+        gram_parts = w.lower().split("_")
+        display_w = w.replace("_", " ")
         
-        # Match if the whole phrase is in list OR if the first word is a prefix (e.g., 'not')
-        if any(term == clean_w or (len(parts) > 0 and parts[0] == term) for term in neg_terms):
-            neg_captured.append(clean_w)
-        elif any(term == clean_w or (len(parts) > 0 and parts[0] == term) for term in sup_terms):
-            sup_captured.append(clean_w)
+        # Match if any part of the token (split by underscore) is in the trigger lists
+        if any(part in neg_triggers for part in gram_parts):
+            neg_captured.append(display_w)
+        elif any(part in sup_triggers for part in gram_parts):
+            sup_captured.append(display_w)
 
     return sorted(list(set(neg_captured)))[:10], sorted(list(set(sup_captured)))[:10]
 
