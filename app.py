@@ -50,8 +50,6 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
 
     custom_stops_set = set([str(x).strip().lower() for x in custom_stops])
 
-    # FIX 1: Include negation_list and superlative_list words in gram_influencers
-    # so they survive stopword filtering and can form grams properly.
     gram_influencers = set(
         gram_rules['prefix_2g'] +
         gram_rules['suffix_2g'] +
@@ -84,13 +82,16 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
     i = 0
     while i < len(tokens):
         match_found = False
+        # Try 3-grams first
         if i < len(tokens) - 2:
             trigram_raw = f"{tokens[i]} {tokens[i+1]} {tokens[i+2]}"
-            prefix_2g = f"{tokens[i]} {tokens[i+1]}"
-            if trigram_raw in gram_rules['spec_3g'] or prefix_2g in gram_rules['prefix_3g']:
+            prefix_2g_part = f"{tokens[i]} {tokens[i+1]}"
+            if trigram_raw in gram_rules['spec_3g'] or prefix_2g_part in gram_rules['prefix_3g']:
                 processed_tokens.append(f"{tokens[i]}_{tokens[i+1]}_{tokens[i+2]}")
                 i += 3
                 match_found = True
+        
+        # Try 2-grams
         if not match_found and i < len(tokens) - 1:
             bigram_raw = f"{tokens[i]} {tokens[i+1]}"
             if (bigram_raw in gram_rules['spec_2g'] or
@@ -121,12 +122,6 @@ def get_sentiment_words(text_series):
     return pos, neg
 
 def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
-    """
-    FIX 2: Corrected prefix matching logic.
-    - Handles both single-word and multi-word prefixes (normalized to underscore form).
-    - Also catches single-word tokens that are themselves in the lists (not just grams).
-    - Avoids double-counting by checking negation first, then superlative.
-    """
     words = " ".join(text_series).split()
     neg_captured = []
     sup_captured = []
@@ -149,29 +144,37 @@ def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
     return sorted(list(set(neg_captured)))[:10], sorted(list(set(sup_captured)))[:10]
 
 def generate_word_cloud(text_series, palette, shape):
-    """
-    FIX 3: Replace underscores with spaces before rendering so gram tokens
-    like 'not_fresh' display as 'not fresh' in the word cloud.
-    """
-    display_series = text_series.str.replace("_", " ", regex=False)
-    combined_text = " ".join(display_series).strip()
+    # Keep underscores for the WordCloud generator but use a Regex to keep them linked
+    combined_text = " ".join(text_series).strip()
     if not combined_text:
         fig, ax = plt.subplots(); ax.text(0.5, 0.5, "No text available", ha='center'); ax.axis("off")
         return fig
+    
     mask = None
     if shape == "Round":
         img = Image.new("L", (800, 800), 255)
         draw = ImageDraw.Draw(img); draw.ellipse((20,20,780,780), fill=0); mask = np.array(img)
-    wc = WordCloud(background_color="white", colormap=palette, mask=mask, width=800, height=500, collocations=False)
-    wc.generate(combined_text)
+    
+    # FIX: regexp=r"\S+" ensures underscores are treated as part of the word
+    wc = WordCloud(
+        background_color="white", 
+        colormap=palette, 
+        mask=mask, 
+        width=800, 
+        height=500, 
+        collocations=False,
+        regexp=r"\S+" 
+    ).generate(combined_text)
+    
     fig, ax = plt.subplots(); ax.imshow(wc, interpolation='bilinear'); ax.axis("off")
     return fig
 
 def generate_word_tree(text_series, min_freq, palette):
-    valid = [t for t in text_series if len(t.split()) > 1]
+    valid = [t for t in text_series if len(t.split()) > 0]
     if not valid: return None
     try:
-        vec = CountVectorizer(min_df=min_freq)
+        # Use custom pattern to respect underscores
+        vec = CountVectorizer(min_df=min_freq, token_pattern=r"(?u)\b\S+\b")
         mtx = vec.fit_transform(valid); words = vec.get_feature_names_out()
         if len(words) < 2: return None
         adj = (mtx.T * mtx); adj.setdiag(0); G = nx.from_scipy_sparse_array(adj)
@@ -188,7 +191,7 @@ def run_fca(df, p_col, fmin, use_tfidf):
     grouped = df.groupby(p_col)['cleaned'].apply(lambda x: " ".join(x))
     if len(grouped) < 3: return None, "Need 3+ products for Factorial Mapping."
     VecClass = TfidfVectorizer if use_tfidf else CountVectorizer
-    vec = VecClass(min_df=min(fmin, len(grouped)))
+    vec = VecClass(min_df=min(fmin, len(grouped)), token_pattern=r"(?u)\b\S+\b")
     X = vec.fit_transform(grouped).toarray()
     words, products = vec.get_feature_names_out(), grouped.index.tolist()
     X_centered = X - np.mean(X, axis=0)
@@ -198,6 +201,18 @@ def run_fca(df, p_col, fmin, use_tfidf):
     return (row_coords, col_coords, products, words, svd.explained_variance_ratio_), None
 
 # --- UI Setup ---
+if 'gram_rules' not in st.session_state:
+    st.session_state.gram_rules = {
+        # FIX: "not" and "very" removed from suffix to prevent greedy backward-merging
+        'prefix_2g': ["not", "too", "very", "real", "really", "enough", "less", "more", "little", "lot", "so", "just", "quite", "many", "no"],
+        'suffix_2g': ["enough", "away"], 
+        'prefix_3g': ["not too", "not very", "not real", "not enough"],
+        'spec_2g': ["lily valley", "funeral flower", "white flower", "old fashion", "old people", "old lady", "house cleaner", "not fresh", "not clean"],
+        'spec_3g': ["not smell good", "smell very good", "not smell bad", "smell very bad"],
+        'negation_list': ["not", "not too", "less", "little", "not very", "not at all", "no"],
+        'superlative_list': ["really", "very", "enough", "quite", "many", "just", "more", "real", "so", "too"]
+    }
+
 with st.sidebar:
     st.header("⚙️ Settings")
     uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
@@ -218,8 +233,8 @@ with st.sidebar:
                 if selected_codes:
                     target_indices = df_raw[df_raw[filter_col].isin(selected_codes)].index
                     filter_label = f"{filter_col}: {', '.join(map(str, selected_codes))}"
-        except ImportError:
-            st.error("❌ The 'openpyxl' library is missing. Please add it to your requirements.txt file.")
+        except Exception as e:
+            st.error(f"Error loading file: {e}")
             st.stop()
 
         st.divider()
@@ -231,24 +246,6 @@ with st.sidebar:
         use_tfidf = st.toggle("Use TF-IDF Weighting", value=True)
         shape_opt = st.radio("Cloud Shape", ["Rectangle", "Round"])
         palette_opt = st.selectbox("Palette", ["copper", "GnBu", "RdPu", "viridis"])
-
-if 'gram_rules' not in st.session_state:
-    st.session_state.gram_rules = {
-        'prefix_2g': ["not", "too", "very", "real", "really", "enough", "because", "if", "less", "more", "little", "lot", "all", "so", "just", "quite", "many"],
-        # FIX 4 — ROOT CAUSE OF THE BUG:
-        # The old suffix_2g contained "not", "very", "too", "so", etc. — words that are
-        # ALSO in prefix_2g. This caused the token BEFORE "not" to greedily consume it
-        # as a suffix bigram (e.g. "smell" + "not" → "smell_not"), so "not" was never
-        # available to form "not_fresh" afterward. Fresh was then left stranded alone.
-        # suffix_2g must ONLY contain genuine terminators: words that make sense as the
-        # SECOND element of a gram but should never start one.
-        'suffix_2g': ["enough", "because", "if"],
-        'prefix_3g': ["not too", "not very", "not real", "not enough"],
-        'spec_2g': ["lily valley", "funeral flower", "white flower", "old fashion", "old people", "old lady", "house cleaner", "not fresh", "not clean"],
-        'spec_3g': ["not smell good", "smell very good", "not smell bad", "smell very bad"],
-        'negation_list': ["not", "not too", "less", "little", "not very", "not at all"],
-        'superlative_list': ["really", "very", "enough", "quite", "many", "just", "more", "real", "so", "too", "too much"]
-    }
 
 tab1, tab2, tab3, tab4, tab6, tab5 = st.tabs(["📊 Single Product", "⚔️ Comparison", "🌐 Factorial Map", "🔍 Topic Lab", "🎯 Impact Lab", "🚫 Exclusions & Grams"])
 
@@ -276,18 +273,20 @@ if uploaded_file and 'df_raw' in locals():
 
             if not p_sub_cleaned.empty:
                 full_text = " ".join(p_sub_cleaned)
-                cv = CountVectorizer()
+                # FIX: CountVectorizer must respect underscores here
+                cv = CountVectorizer(token_pattern=r"(?u)\b\S+\b")
                 cv_mtx = cv.fit_transform([full_text])
                 counts = dict(zip(cv.get_feature_names_out(), cv_mtx.toarray()[0]))
-                tv = TfidfVectorizer()
+                
+                tv = TfidfVectorizer(token_pattern=r"(?u)\b\S+\b")
                 tv_mtx = tv.fit_transform([full_text])
                 tfidf = dict(zip(tv.get_feature_names_out(), tv_mtx.toarray()[0]))
 
-                export_df = pd.DataFrame({"Word": counts.keys(), "Unweighted Frequency": counts.values(), "Weighted (TF-IDF) Frequency": [tfidf[w] for w in counts.keys()]}).sort_values(by="Unweighted Frequency", ascending=False)
+                export_df = pd.DataFrame({"Word": [w.replace("_", " ") for w in counts.keys()], "Unweighted Frequency": counts.values(), "Weighted (TF-IDF)": [tfidf[w] for w in counts.keys()]}).sort_values(by="Unweighted Frequency", ascending=False)
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    export_df.to_excel(writer, index=False, sheet_name='Word Frequencies')
-                st.download_button(label="📥 Download Word Cloud Stats (Excel)", data=output.getvalue(), file_name=f"{target_p}_word_cloud_stats.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    export_df.to_excel(writer, index=False, sheet_name='Stats')
+                st.download_button(label="📥 Download Word Stats (Excel)", data=output.getvalue(), file_name=f"{target_p}_stats.xlsx")
 
             sent_val = product_data[v_col].apply(lambda x: TextBlob(str(x)).sentiment.polarity).mean()
             st.metric(f"Target Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
@@ -300,7 +299,6 @@ if uploaded_file and 'df_raw' in locals():
                 if tree_fig: st.pyplot(tree_fig)
                 else: st.warning("Not enough patterns.")
 
-            # Row 1: Sentiments
             pos_words, neg_words = get_sentiment_words(p_sub_cleaned)
             l, r = st.columns(2)
             with l:
@@ -310,23 +308,14 @@ if uploaded_file and 'df_raw' in locals():
                 st.error("⚠️ **Negative Descriptors**")
                 for w, s in neg_words: st.write(f"- {w.replace('_', ' ')}")
 
-            # Row 2: Gram Categories (Negation & Superlative)
-            neg_grams, sup_grams = get_gram_categories(
-                p_sub_cleaned,
-                st.session_state.gram_rules['negation_list'],
-                st.session_state.gram_rules['superlative_list']
-            )
+            neg_grams, sup_grams = get_gram_categories(p_sub_cleaned, st.session_state.gram_rules['negation_list'], st.session_state.gram_rules['superlative_list'])
             l2, r2 = st.columns(2)
             with l2:
-                st.warning("🚫 **Negation Gram**")
-                if neg_grams:
-                    for g in neg_grams: st.write(f"- {g}")
-                else: st.write("No negations found.")
+                st.warning("🚫 **Negation Grams**")
+                for g in neg_grams: st.write(f"- {g}")
             with r2:
-                st.info("💎 **Superlative**")
-                if sup_grams:
-                    for g in sup_grams: st.write(f"- {g}")
-                else: st.write("No superlatives found.")
+                st.info("💎 **Superlatives**")
+                for g in sup_grams: st.write(f"- {g}")
 
         with tab2:
             st.subheader("⚔️ Scent Comparison")
@@ -336,7 +325,7 @@ if uploaded_file and 'df_raw' in locals():
             d_a = df[df[p_col].astype(str) == p_a]['cleaned']
             d_b = df[df[p_col].astype(str) == p_b]['cleaned']
             if not d_a.empty and not d_b.empty:
-                sim = float(cosine_similarity(TfidfVectorizer().fit_transform([" ".join(d_a), " ".join(d_b)]))[0][1])
+                sim = float(cosine_similarity(TfidfVectorizer(token_pattern=r"(?u)\b\S+\b").fit_transform([" ".join(d_a), " ".join(d_b)]))[0][1])
                 st.metric("Olfactive Similarity", f"{round(sim*100, 1)}%")
                 st.progress(sim)
                 comp_cols[0].pyplot(generate_word_cloud(d_a, palette_opt, shape_opt))
@@ -353,7 +342,7 @@ if uploaded_file and 'df_raw' in locals():
                 ax.scatter(c_c[:,0], c_c[:,1], c='red', marker='x', alpha=0.2)
                 for i, txt in enumerate(wrds):
                     if np.linalg.norm(c_c[i]) > np.percentile([np.linalg.norm(c) for c in c_c], 80):
-                        ax.text(c_c[i,0], c_c[i,1], txt, color='darkred', fontsize=8)
+                        ax.text(c_c[i,0], c_c[i,1], txt.replace("_", " "), color='darkred', fontsize=8)
                 st.pyplot(fig)
             else: st.error(err)
 
@@ -361,7 +350,7 @@ if uploaded_file and 'df_raw' in locals():
             st.subheader("🔍 Topic Lab")
             num_t = st.slider("Themes", 2, 8, 3)
             if st.button("Generate Topics"):
-                vec = TfidfVectorizer(max_features=500)
+                vec = TfidfVectorizer(max_features=500, token_pattern=r"(?u)\b\S+\b")
                 mtx = vec.fit_transform(df['cleaned'])
                 nmf = NMF(n_components=num_t, random_state=42, init='nndsvd').fit(mtx)
                 doc_topic = nmf.transform(mtx)
@@ -369,42 +358,28 @@ if uploaded_file and 'df_raw' in locals():
                 cols = st.columns(num_t)
                 for i, topic in enumerate(nmf.components_):
                     with cols[i % num_t]:
-                        top_words = [fn[j] for j in topic.argsort()[-7:]]
+                        top_words = [fn[j].replace("_", " ") for j in topic.argsort()[-7:]]
                         st.info(f"**Theme {i+1}**\n\n" + ", ".join(top_words))
                         closest_idx = doc_topic[:, i].argmax()
-                        furthest_idx = doc_topic[:, i].argmin()
-                        st.success(f"✅ **Closest:** {df.iloc[closest_idx][p_col]}")
-                        st.error(f"❌ **Furthest:** {df.iloc[furthest_idx][p_col]}")
+                        st.success(f"✅ **Primary:** {df.iloc[closest_idx][p_col]}")
 
         with tab6:
             st.subheader("🎯 Preference Driver Analysis")
             pref_col = st.session_state.get('pref_col', "None")
             if pref_col == "None":
-                st.warning("Please select a Preference Score column in the sidebar to unlock this tab.")
+                st.warning("Please select a Preference Score column.")
             else:
                 try:
                     df_imp = df.dropna(subset=[pref_col, 'cleaned'])
                     df_imp = df_imp[df_imp['cleaned'] != ""]
-                    vec_imp = CountVectorizer(min_df=3, binary=True)
+                    vec_imp = CountVectorizer(min_df=3, binary=True, token_pattern=r"(?u)\b\S+\b")
                     X_imp = vec_imp.fit_transform(df_imp['cleaned'])
                     y_imp = df_imp[pref_col]
                     model = Ridge(alpha=1.0).fit(X_imp, y_imp)
-                    impact_df = pd.DataFrame({'Word': vec_imp.get_feature_names_out(), 'Impact': model.coef_}).sort_values(by='Impact', ascending=False)
-
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.success("**Positive Drivers**")
-                        st.dataframe(impact_df.head(10))
-                    with c2:
-                        st.error("**Negative Drivers**")
-                        st.dataframe(impact_df.tail(10))
-
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    top_bot = pd.concat([impact_df.head(10), impact_df.tail(10)])
-                    ax.barh(top_bot['Word'], top_bot['Impact'], color=['green' if x > 0 else 'red' for x in top_bot['Impact']])
-                    st.pyplot(fig)
+                    impact_df = pd.DataFrame({'Word': [w.replace("_", " ") for w in vec_imp.get_feature_names_out()], 'Impact': model.coef_}).sort_values(by='Impact', ascending=False)
+                    st.dataframe(impact_df)
                 except Exception as e:
-                    st.error(f"Error calculating drivers: {e}")
+                    st.error(f"Error: {e}")
 
 with tab5:
     st.subheader("🚫 Exclusions & Gram Lab")
@@ -413,11 +388,8 @@ with tab5:
         st.markdown("### 🛑 Word Exclusions")
         stops = st.session_state.get('custom_stop_list', [])
         txt_stops = st.text_area("Stopwords (comma separated)", value=", ".join(stops), height=150)
-
-        st.markdown("### 📊 List Category Prefixes")
         gn_list = st.text_input("Grams Negation for Lists", ", ".join(st.session_state.gram_rules['negation_list']))
         gs_list = st.text_input("Grams Superlative for Lists", ", ".join(st.session_state.gram_rules['superlative_list']))
-
     with col_right:
         st.markdown("### 🔗 Gram Dictionary")
         g = st.session_state.gram_rules
@@ -439,5 +411,4 @@ with tab5:
             'superlative_list': [x.strip().lower() for x in gs_list.split(",") if x.strip()]
         }
         st.rerun()
-
 
