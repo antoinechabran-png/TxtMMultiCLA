@@ -110,46 +110,43 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
 def get_sentiment_words(text_series):
     words = " ".join(text_series).split()
     if not words: return [], []
-    unique_words = list(set(words))
+    
+    # Count frequency for sorting relevance
+    counts = Counter(words)
+    unique_tokens = list(counts.keys())
+    
     scored = []
-    for w in unique_words:
-        display_text = w.replace("_", " ")
-        score = TextBlob(display_text).sentiment.polarity
-        scored.append((w, score))
-    pos = sorted([x for x in scored if x[1] > 0.1], key=lambda x: x[1], reverse=True)[:10]
-    neg = sorted([x for x in scored if x[1] < -0.1], key=lambda x: x[1])[:10]
-    return pos, neg
+    for token in unique_tokens:
+        # Evaluate sentiment on the clean version (spaces), but keep token (underscores)
+        eval_text = token.replace("_", " ")
+        score = TextBlob(eval_text).sentiment.polarity
+        scored.append({'token': token, 'score': score, 'freq': counts[token]})
+    
+    # Sort primarily by score intensity, secondarily by frequency
+    pos = sorted([x for x in scored if x['score'] > 0.1], key=lambda x: (x['score'], x['freq']), reverse=True)[:10]
+    neg = sorted([x for x in scored if x['score'] < -0.1], key=lambda x: (x['score'], x['freq']))[:10]
+    
+    return [p['token'] for p in pos], [n['token'] for n in neg]
 
-# --- UPDATED: Gram Output Matching Logic ---
 def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
-    # Flatten all tokens to count frequency
     all_tokens = " ".join(text_series).split()
     if not all_tokens: return [], []
-    
     counts = Counter(all_tokens)
     
-    neg_captured = []
-    sup_captured = []
-
-    # Map prefixes to sets for faster lookup
+    neg_captured, sup_captured = [], []
     neg_triggers = set([w.lower() for phrase in negation_prefixes for w in phrase.split()])
     sup_triggers = set([w.lower() for phrase in superlative_prefixes for w in phrase.split()])
 
     for token, freq in counts.items():
-        # Only analyze items that are grams (contain underscores)
         if "_" in token:
             parts = token.lower().split("_")
-            
-            # If the FIRST part of the gram is in your lists, categorize it
             if parts[0] in neg_triggers:
                 neg_captured.append((token, freq))
             elif parts[0] in sup_triggers:
                 sup_captured.append((token, freq))
     
-    # Sort by frequency (descending) and take top 10
     top_neg = [item[0] for item in sorted(neg_captured, key=lambda x: x[1], reverse=True)[:10]]
     top_sup = [item[0] for item in sorted(sup_captured, key=lambda x: x[1], reverse=True)[:10]]
-
     return top_neg, top_sup
 
 def generate_word_cloud(text_series, palette, shape):
@@ -164,13 +161,8 @@ def generate_word_cloud(text_series, palette, shape):
         draw = ImageDraw.Draw(img); draw.ellipse((20,20,780,780), fill=0); mask = np.array(img)
     
     wc = WordCloud(
-        background_color="white", 
-        colormap=palette, 
-        mask=mask, 
-        width=800, 
-        height=500, 
-        collocations=False,
-        regexp=r"\S+" 
+        background_color="white", colormap=palette, mask=mask, 
+        width=800, height=500, collocations=False, regexp=r"\S+" 
     ).generate(combined_text)
     
     fig, ax = plt.subplots(); ax.imshow(wc, interpolation='bilinear'); ax.axis("off")
@@ -206,7 +198,7 @@ def run_fca(df, p_col, fmin, use_tfidf):
     col_coords = svd.components_.T * (np.std(row_coords) / (np.std(svd.components_.T) + 1e-9))
     return (row_coords, col_coords, products, words, svd.explained_variance_ratio_), None
 
-# --- UI Setup ---
+# --- UI Logic ---
 if 'gram_rules' not in st.session_state:
     st.session_state.gram_rules = {
         'prefix_2g': ["not", "too", "very", "real", "really", "enough", "less", "more", "little", "lot", "so", "just", "quite", "many", "no"],
@@ -221,13 +213,11 @@ if 'gram_rules' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Settings")
     uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
-
     if uploaded_file:
         try:
             xl = pd.ExcelFile(uploaded_file)
             sheet = st.selectbox("Select Sheet:", xl.sheet_names)
             df_raw = pd.read_excel(uploaded_file, sheet_name=sheet)
-
             st.subheader("🎯 Sub-Target Filter")
             filter_col = st.selectbox("Filter Column:", ["No Filter"] + list(df_raw.columns))
             target_indices = df_raw.index
@@ -239,14 +229,12 @@ with st.sidebar:
                     target_indices = df_raw[df_raw[filter_col].isin(selected_codes)].index
                     filter_label = f"{filter_col}: {', '.join(map(str, selected_codes))}"
         except Exception as e:
-            st.error(f"Error loading file: {e}")
-            st.stop()
+            st.error(f"Error: {e}"); st.stop()
 
         st.divider()
         dataset_lang = st.selectbox("Language:", list(MULTILINGUAL_STOPWORDS.keys()))
         if 'custom_stop_list' not in st.session_state:
             st.session_state.custom_stop_list = MULTILINGUAL_STOPWORDS[dataset_lang]
-
         fmin_global = st.slider("Min Word Frequency (for Cloud)", 1, 50, 5)
         use_tfidf = st.toggle("Use TF-IDF Weighting", value=True)
         shape_opt = st.radio("Cloud Shape", ["Rectangle", "Round"])
@@ -269,55 +257,64 @@ if uploaded_file and 'df_raw' in locals():
     if 'processed_df' in st.session_state:
         df = st.session_state['processed_df']
         p_list = sorted(df[p_col].dropna().astype(str).unique())
-        st.caption(f"📍 **Currently Analyzing:** {st.session_state.get('filter_info', 'Total Sample')} (N={len(df)})")
 
         with tab1:
             target_p = st.selectbox("Fragrance Focus", p_list)
             product_data = df[df[p_col].astype(str) == target_p]
             p_sub_cleaned = product_data['cleaned']
 
-            # Metrics
+            # Metrics & Visuals
             sent_val = product_data[v_col].apply(lambda x: TextBlob(str(x)).sentiment.polarity).mean()
-            st.metric(f"Target Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
+            st.metric(f"Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
             st.progress((sent_val + 1) / 2)
             
-            # Visuals
             c1, c2 = st.columns(2)
-            with c1:
-                st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
-            with c2:
+            with c1: st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
+            with c2: 
                 tree_fig = generate_word_tree(p_sub_cleaned, fmin_global, palette_opt)
                 if tree_fig: st.pyplot(tree_fig)
                 else: st.warning("Not enough patterns.")
 
-            # Gram Radar (MATCHES CLOUD OUTPUT FORMAT)
-            neg_grams, sup_grams = get_gram_categories(p_sub_cleaned, st.session_state.gram_rules['negation_list'], st.session_state.gram_rules['superlative_list'])
             st.divider()
-            st.markdown("🔍 **Top Detections (Raw Output Tokens)**")
-            l2, r2 = st.columns(2)
-            with l2:
-                st.warning("🚫 **Negation List (Top 10)**")
+            st.markdown("🔍 **Olfactive Descriptors & Gram Radar (Top 10)**")
+            
+            # --- restored SENTIMENT LISTS ---
+            pos_words, neg_words = get_sentiment_words(p_sub_cleaned)
+            sl, sr = st.columns(2)
+            with sl:
+                st.success("✨ **Positive Descriptors**")
+                if pos_words:
+                    for w in pos_words: st.write(f"- {w}")
+                else: st.write("None.")
+            with sr:
+                st.error("⚠️ **Negative Descriptors**")
+                if neg_words:
+                    for w in neg_words: st.write(f"- {w}")
+                else: st.write("None.")
+            
+            # --- GRAM LISTS ---
+            neg_grams, sup_grams = get_gram_categories(p_sub_cleaned, st.session_state.gram_rules['negation_list'], st.session_state.gram_rules['superlative_list'])
+            gl, gr = st.columns(2)
+            with gl:
+                st.warning("🚫 **Negation List**")
                 if neg_grams:
                     for g in neg_grams: st.write(f"- {g}")
-                else: st.write("No negations detected.")
-            with r2:
-                st.info("💎 **Superlative List (Top 10)**")
+                else: st.write("None.")
+            with gr:
+                st.info("💎 **Superlative List**")
                 if sup_grams:
                     for g in sup_grams: st.write(f"- {g}")
-                else: st.write("No superlatives detected.")
+                else: st.write("None.")
 
-        # Tab 2, 3, 4, 6 remain standard...
         with tab2:
             st.subheader("⚔️ Scent Comparison")
             comp_cols = st.columns(2)
             p_a = comp_cols[0].selectbox("Fragrance A", p_list, index=0)
             p_b = comp_cols[1].selectbox("Fragrance B", p_list, index=min(1, len(p_list)-1))
-            d_a = df[df[p_col].astype(str) == p_a]['cleaned']
-            d_b = df[df[p_col].astype(str) == p_b]['cleaned']
+            d_a, d_b = df[df[p_col].astype(str) == p_a]['cleaned'], df[df[p_col].astype(str) == p_b]['cleaned']
             if not d_a.empty and not d_b.empty:
                 sim = float(cosine_similarity(TfidfVectorizer(token_pattern=r"(?u)\b\S+\b").fit_transform([" ".join(d_a), " ".join(d_b)]))[0][1])
                 st.metric("Olfactive Similarity", f"{round(sim*100, 1)}%")
-                st.progress(sim)
                 comp_cols[0].pyplot(generate_word_cloud(d_a, palette_opt, shape_opt))
                 comp_cols[1].pyplot(generate_word_cloud(d_b, palette_opt, shape_opt))
 
@@ -343,53 +340,44 @@ if uploaded_file and 'df_raw' in locals():
                 vec = TfidfVectorizer(max_features=500, token_pattern=r"(?u)\b\S+\b")
                 mtx = vec.fit_transform(df['cleaned'])
                 nmf = NMF(n_components=num_t, random_state=42, init='nndsvd').fit(mtx)
-                doc_topic = nmf.transform(mtx)
-                fn = vec.get_feature_names_out()
+                doc_topic, fn = nmf.transform(mtx), vec.get_feature_names_out()
                 cols = st.columns(num_t)
                 for i, topic in enumerate(nmf.components_):
                     with cols[i % num_t]:
                         top_words = [fn[j].replace("_", " ") for j in topic.argsort()[-7:]]
                         st.info(f"**Theme {i+1}**\n\n" + ", ".join(top_words))
-                        closest_idx = doc_topic[:, i].argmax()
-                        st.success(f"✅ **Primary:** {df.iloc[closest_idx][p_col]}")
+                        st.success(f"✅ **Primary:** {df.iloc[doc_topic[:, i].argmax()][p_col]}")
 
         with tab6:
             st.subheader("🎯 Preference Driver Analysis")
             pref_col = st.session_state.get('pref_col', "None")
-            if pref_col == "None":
-                st.warning("Please select a Preference Score column.")
-            else:
+            if pref_col != "None":
                 try:
-                    df_imp = df.dropna(subset=[pref_col, 'cleaned'])
-                    df_imp = df_imp[df_imp['cleaned'] != ""]
+                    df_imp = df.dropna(subset=[pref_col, 'cleaned']).loc[lambda x: x['cleaned'] != ""]
                     vec_imp = CountVectorizer(min_df=3, binary=True, token_pattern=r"(?u)\b\S+\b")
-                    X_imp = vec_imp.fit_transform(df_imp['cleaned'])
-                    y_imp = df_imp[pref_col]
-                    model = Ridge(alpha=1.0).fit(X_imp, y_imp)
-                    impact_df = pd.DataFrame({'Word': [w.replace("_", " ") for w in vec_imp.get_feature_names_out()], 'Impact': model.coef_}).sort_values(by='Impact', ascending=False)
+                    X_imp, y_imp = vec_imp.fit_transform(df_imp['cleaned']), df_imp[pref_col]
+                    impact_df = pd.DataFrame({'Word': [w.replace("_", " ") for w in vec_imp.get_feature_names_out()], 'Impact': Ridge(alpha=1.0).fit(X_imp, y_imp).coef_}).sort_values(by='Impact', ascending=False)
                     st.dataframe(impact_df)
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                except Exception as e: st.error(f"Error: {e}")
+            else: st.warning("Select Preference Score column.")
 
 with tab5:
     st.subheader("🚫 Exclusions & Gram Lab")
     col_left, col_right = st.columns(2)
     with col_left:
-        st.markdown("### 🛑 Word Exclusions")
         stops = st.session_state.get('custom_stop_list', [])
-        txt_stops = st.text_area("Stopwords (comma separated)", value=", ".join(stops), height=150)
-        gn_list = st.text_input("Grams Negation Triggers", ", ".join(st.session_state.gram_rules['negation_list']))
-        gs_list = st.text_input("Grams Superlative Triggers", ", ".join(st.session_state.gram_rules['superlative_list']))
+        txt_stops = st.text_area("Stopwords", value=", ".join(stops), height=150)
+        gn_list = st.text_input("Negation Triggers", ", ".join(st.session_state.gram_rules['negation_list']))
+        gs_list = st.text_input("Superlative Triggers", ", ".join(st.session_state.gram_rules['superlative_list']))
     with col_right:
-        st.markdown("### 🔗 Gram Dictionary")
         g = st.session_state.gram_rules
-        p2 = st.text_input("Word prefix of authorized 2-gram", ", ".join(g['prefix_2g']))
-        s2 = st.text_input("Word suffix of authorized 2-gram", ", ".join(g['suffix_2g']))
-        p3 = st.text_input("2-gram prefix of authorized 3-gram", ", ".join(g['prefix_3g']))
-        a2 = st.text_input("Special authorization of 2-gram", ", ".join(g['spec_2g']))
-        a3 = st.text_input("Special authorization of 3-gram", ", ".join(g['spec_3g']))
+        p2 = st.text_input("Prefix 2-gram", ", ".join(g['prefix_2g']))
+        s2 = st.text_input("Suffix 2-gram", ", ".join(g['suffix_2g']))
+        p3 = st.text_input("Prefix 3-gram", ", ".join(g['prefix_3g']))
+        a2 = st.text_input("Special 2-gram", ", ".join(g['spec_2g']))
+        a3 = st.text_input("Special 3-gram", ", ".join(g['spec_3g']))
 
-    if st.button("💾 Apply Rules & Re-Process"):
+    if st.button("💾 Apply & Re-Process"):
         st.session_state.custom_stop_list = [x.strip().lower() for x in txt_stops.split(",") if x.strip()]
         st.session_state.gram_rules = {
             'prefix_2g': [x.strip().lower() for x in p2.split(",") if x.strip()],
