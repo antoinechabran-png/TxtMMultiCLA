@@ -119,24 +119,23 @@ def get_sentiment_words(text_series):
     neg = sorted([x for x in scored if x[1] < -0.1], key=lambda x: x[1])[:10]
     return pos, neg
 
-# --- FIX: IMPROVED CATEGORY DETECTION ---
+# --- FIX APPLIED HERE ---
 def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
     words = " ".join(text_series).split()
     neg_captured = []
     sup_captured = []
 
-    # Prepare search terms (both space and underscore versions)
     neg_terms = [p.strip().lower() for p in negation_prefixes]
     sup_terms = [p.strip().lower() for p in superlative_prefixes]
 
     for w in set(words):
         clean_w = w.replace("_", " ")
+        parts = clean_w.split()
         
-        # Check if the word or any part of the gram contains a negation term
-        if any(term == clean_w or clean_w.startswith(term + " ") for term in neg_terms):
+        # Match if the whole phrase is in list OR if the first word is a prefix (e.g., 'not')
+        if any(term == clean_w or (len(parts) > 0 and parts[0] == term) for term in neg_terms):
             neg_captured.append(clean_w)
-        # Check for superlative terms
-        elif any(term == clean_w or clean_w.startswith(term + " ") for term in sup_terms):
+        elif any(term == clean_w or (len(parts) > 0 and parts[0] == term) for term in sup_terms):
             sup_captured.append(clean_w)
 
     return sorted(list(set(neg_captured)))[:10], sorted(list(set(sup_captured)))[:10]
