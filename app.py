@@ -119,9 +119,12 @@ def get_sentiment_words(text_series):
     neg = sorted([x for x in scored if x[1] < -0.1], key=lambda x: x[1])[:10]
     return pos, neg
 
-# --- IMPROVED ROBUST DETECTION ---
+# --- DECOUPLED RADAR LOGIC ---
 def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
-    words = " ".join(text_series).split()
+    # We use the raw "cleaned" series to catch even N=1 occurrences
+    all_words = " ".join(text_series).split()
+    if not all_words: return [], []
+    
     neg_captured = []
     sup_captured = []
 
@@ -129,18 +132,18 @@ def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
     neg_triggers = set([w for phrase in negation_prefixes for w in phrase.lower().split()])
     sup_triggers = set([w for phrase in superlative_prefixes for w in phrase.lower().split()])
 
-    for w in set(words):
-        # Handle underscored tokens
+    # Look at every unique word/gram found in the data, regardless of global threshold
+    for w in set(all_words):
         gram_parts = w.lower().split("_")
         display_w = w.replace("_", " ")
         
-        # Match if any part of the token (split by underscore) is in the trigger lists
+        # Capture if ANY part of the gram matches a trigger
         if any(part in neg_triggers for part in gram_parts):
             neg_captured.append(display_w)
         elif any(part in sup_triggers for part in gram_parts):
             sup_captured.append(display_w)
 
-    return sorted(list(set(neg_captured)))[:10], sorted(list(set(sup_captured)))[:10]
+    return sorted(list(set(neg_captured)))[:15], sorted(list(set(sup_captured)))[:15]
 
 def generate_word_cloud(text_series, palette, shape):
     combined_text = " ".join(text_series).strip()
@@ -237,7 +240,7 @@ with st.sidebar:
         if 'custom_stop_list' not in st.session_state:
             st.session_state.custom_stop_list = MULTILINGUAL_STOPWORDS[dataset_lang]
 
-        fmin_global = st.slider("Min Word Frequency", 1, 50, 5)
+        fmin_global = st.slider("Min Word Frequency (for Cloud)", 1, 50, 5)
         use_tfidf = st.toggle("Use TF-IDF Weighting", value=True)
         shape_opt = st.radio("Cloud Shape", ["Rectangle", "Round"])
         palette_opt = st.selectbox("Palette", ["copper", "GnBu", "RdPu", "viridis"])
@@ -266,25 +269,12 @@ if uploaded_file and 'df_raw' in locals():
             product_data = df[df[p_col].astype(str) == target_p]
             p_sub_cleaned = product_data['cleaned']
 
-            if not p_sub_cleaned.empty:
-                full_text = " ".join(p_sub_cleaned)
-                cv = CountVectorizer(token_pattern=r"(?u)\b\S+\b")
-                cv_mtx = cv.fit_transform([full_text])
-                counts = dict(zip(cv.get_feature_names_out(), cv_mtx.toarray()[0]))
-                
-                tv = TfidfVectorizer(token_pattern=r"(?u)\b\S+\b")
-                tv_mtx = tv.fit_transform([full_text])
-                tfidf = dict(zip(tv.get_feature_names_out(), tv_mtx.toarray()[0]))
-
-                export_df = pd.DataFrame({"Word": [w.replace("_", " ") for w in counts.keys()], "Unweighted Frequency": counts.values(), "Weighted (TF-IDF)": [tfidf[w] for w in counts.keys()]}).sort_values(by="Unweighted Frequency", ascending=False)
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    export_df.to_excel(writer, index=False, sheet_name='Stats')
-                st.download_button(label="📥 Download Word Stats (Excel)", data=output.getvalue(), file_name=f"{target_p}_stats.xlsx")
-
+            # Metrics
             sent_val = product_data[v_col].apply(lambda x: TextBlob(str(x)).sentiment.polarity).mean()
             st.metric(f"Target Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
             st.progress((sent_val + 1) / 2)
+            
+            # Cloud & Tree (Filtered by Frequency Slider)
             c1, c2 = st.columns(2)
             with c1:
                 st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
@@ -293,6 +283,7 @@ if uploaded_file and 'df_raw' in locals():
                 if tree_fig: st.pyplot(tree_fig)
                 else: st.warning("Not enough patterns.")
 
+            # Sentiment Descriptors
             pos_words, neg_words = get_sentiment_words(p_sub_cleaned)
             l, r = st.columns(2)
             with l:
@@ -302,7 +293,10 @@ if uploaded_file and 'df_raw' in locals():
                 st.error("⚠️ **Negative Descriptors**")
                 for w, s in neg_words: st.write(f"- {w.replace('_', ' ')}")
 
+            # Gram Radar (DECOUPLED - catches low frequency)
             neg_grams, sup_grams = get_gram_categories(p_sub_cleaned, st.session_state.gram_rules['negation_list'], st.session_state.gram_rules['superlative_list'])
+            st.divider()
+            st.markdown("🔍 **Deep Radar (Includes low-frequency nuances below cloud threshold)**")
             l2, r2 = st.columns(2)
             with l2:
                 st.warning("🚫 **Negation Grams**")
