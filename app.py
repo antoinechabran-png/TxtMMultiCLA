@@ -356,6 +356,7 @@ if uploaded_file and 'df_raw' in locals():
             if not d_a.empty and not d_b.empty:
                 sim = float(cosine_similarity(TfidfVectorizer(token_pattern=r"(?u)\b\S+\b").fit_transform([" ".join(d_a), " ".join(d_b)]))[0][1])
                 st.metric("Olfactive Similarity", f"{round(sim*100, 1)}%")
+                st.progress(sim) # Re-added progress bar
                 comp_cols[0].pyplot(generate_word_cloud(d_a, palette_opt, shape_opt))
                 comp_cols[1].pyplot(generate_word_cloud(d_b, palette_opt, shape_opt))
 
@@ -387,7 +388,10 @@ if uploaded_file and 'df_raw' in locals():
                     with cols[i % num_t]:
                         top_words = [fn[j].replace("_", " ") for j in topic.argsort()[-7:]]
                         st.info(f"**Theme {i+1}**\n\n" + ", ".join(top_words))
+                        # Primary (Closest)
                         st.success(f"✅ **Primary:** {df.iloc[doc_topic[:, i].argmax()][p_col]}")
+                        # Furthest (Outlier) - Re-added
+                        st.error(f"❌ **Outlier:** {df.iloc[doc_topic[:, i].argmin()][p_col]}")
 
         with tab6:
             st.subheader("🎯 Preference Driver Analysis")
@@ -397,8 +401,35 @@ if uploaded_file and 'df_raw' in locals():
                     df_imp = df.dropna(subset=[pref_col, 'cleaned']).loc[lambda x: x['cleaned'] != ""]
                     vec_imp = CountVectorizer(min_df=3, binary=True, token_pattern=r"(?u)\b\S+\b")
                     X_imp, y_imp = vec_imp.fit_transform(df_imp['cleaned']), df_imp[pref_col]
-                    impact_df = pd.DataFrame({'Word': [w.replace("_", " ") for w in vec_imp.get_feature_names_out()], 'Impact': Ridge(alpha=1.0).fit(X_imp, y_imp).coef_}).sort_values(by='Impact', ascending=False)
-                    st.dataframe(impact_df)
+                    
+                    # Analysis
+                    model = Ridge(alpha=1.0).fit(X_imp, y_imp)
+                    impact_df = pd.DataFrame({
+                        'Word': [w.replace("_", " ") for w in vec_imp.get_feature_names_out()], 
+                        'Impact': model.coef_
+                    }).sort_values(by='Impact', ascending=False)
+                    
+                    # Top 15 Pos / Top 15 Neg
+                    pos_impact = impact_df.head(15).iloc[::-1] # Reverse for plot
+                    neg_impact = impact_df.tail(15)
+                    
+                    # Visual Interface
+                    c1, c2 = st.columns(2)
+                    
+                    with c1:
+                        st.write("📈 **Top 15 Positive Drivers**")
+                        fig_p, ax_p = plt.subplots(figsize=(6, 8))
+                        ax_p.barh(pos_impact['Word'], pos_impact['Impact'], color='#2ecc71')
+                        ax_p.set_title("Increases Preference Score")
+                        st.pyplot(fig_p)
+                        
+                    with c2:
+                        st.write("📉 **Top 15 Negative Drivers**")
+                        fig_n, ax_n = plt.subplots(figsize=(6, 8))
+                        ax_n.barh(neg_impact['Word'], neg_impact['Impact'], color='#e74c3c')
+                        ax_n.set_title("Decreases Preference Score")
+                        st.pyplot(fig_n)
+                        
                 except Exception as e: st.error(f"Error: {e}")
             else: st.warning("Select Preference Score column.")
 
