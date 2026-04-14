@@ -20,15 +20,92 @@ from collections import Counter
 # Page Config
 st.set_page_config(page_title="Fragrance Verbatim Lab Pro", layout="wide", page_icon="🧪")
 
-# --- Multilingual Exclusion Dictionary ---
-MULTILINGUAL_STOPWORDS = {
-    "English": ["product", "smell", "feel", "really", "just", "like", "little", "think", "lot", "make", "also", "bit", "quite", "something", "seem", "evoke", "find", "remind"],
-    "French": ["produit", "odeur", "sent", "vraiment", "comme", "plus", "bien", "fait", "tout", "après", "assez", "évoque", "trouve", "rappelle", "petit", "beaucoup", "être", "avoir"],
-    "German": ["produkt", "riecht", "geruch", "wirklich", "ganz", "viel", "mehr", "oder", "etwa", "lässt", "erinnert", "finde", "bisschen", "scheint", "etwas", "gut", "immer"],
-    "Spanish": ["producto", "huele", "olor", "muy", "como", "mas", "pero", "todo", "este", "sentir", "parece", "evoca", "encuentro", "recuerda", "poco", "mucho", "bien"],
-    "Portuguese": ["producto", "cheiro", "sinto", "muito", "como", "mais", "mas", "tudo", "este", "parece", "evoca", "acho", "lembra", "pouco", "muito", "bem"],
-    "Italian": ["prodotto", "odore", "sento", "molto", "come", "più", "ma", "tutto", "questo", "sembra", "evoca", "trovo", "ricorda", "poco", "molto", "bene"],
-    "Indonesian": ["produk", "bau", "wangi", "sangat", "seperti", "lebih", "tapi", "semua", "ini", "merasa", "tampak", "mengingatkan", "sedikit", "banyak", "bagus"]
+# --- Comprehensive Multilingual Packs ---
+LANGUAGE_PACKS = {
+    "English": {
+        "stops": ["product", "smell", "feel", "really", "just", "like", "little", "think", "lot", "make", "also", "bit", "quite", "something", "seem", "evoke", "find", "remind"],
+        "negation": ["not", "not too", "less", "little", "not very", "not at all", "no"],
+        "superlative": ["really", "very", "enough", "quite", "many", "just", "more", "real", "so", "too"],
+        "rules": {
+            "prefix_2g": ["not", "too", "very", "real", "really", "enough", "less", "more", "little", "lot", "so", "just", "quite", "many", "no"],
+            "suffix_2g": ["enough", "away"],
+            "prefix_3g": ["not too", "not very", "not real", "not enough"],
+            "spec_2g": ["lily valley", "funeral flower", "white flower", "old fashion", "old people", "old lady", "house cleaner", "not fresh", "not clean"],
+            "spec_3g": ["not smell good", "smell very good", "not smell bad", "smell very bad"]
+        }
+    },
+    "French": {
+        "stops": ["produit", "odeur", "sentir", "vraiment", "juste", "comme", "petit", "penser", "beaucoup", "faire", "aussi", "peu", "assez", "quelque chose", "sembler", "évoquer", "trouver", "rappeler"],
+        "negation": ["pas", "pas trop", "moins", "peu", "pas très", "pas du tout", "non plus"],
+        "superlative": ["vraiment", "très", "assez", "plutôt", "beaucoup", "juste", "plus", "réel", "tellement", "trop"],
+        "rules": {
+            "prefix_2g": ["pas", "trop", "très", "vrai", "vraiment", "assez", "moins", "plus", "peu", "beaucoup", "tellement", "juste", "plutôt", "plusieurs", "non"],
+            "suffix_2g": ["assez", "partout"],
+            "prefix_3g": ["pas trop", "pas très", "pas vraiment", "pas assez"],
+            "spec_2g": ["muguet", "fleur de cimetière", "fleurs blanches", "démodé", "personnes âgées", "vieille dame", "produit ménager", "manque de fraîcheur", "pas clair"],
+            "spec_3g": ["ne sent pas bon", "sent super bon", "ne sent pas mauvais", "sent très mauvais"]
+        }
+    },
+    "Spanish": {
+        "stops": ["producto", "olor", "sentir", "realmente", "solo", "como", "poco", "pensar", "mucho", "hacer", "también", "un poco", "bastante", "algo", "parecer", "evocar", "encontrar", "recordar"],
+        "negation": ["no", "no demasiado", "menos", "poco", "no muy", "para nada", "tampoco"],
+        "superlative": ["realmente", "muy", "suficiente", "bastante", "muchos", "solo", "más", "real", "tan", "demasiado"],
+        "rules": {
+            "prefix_2g": ["no", "demasiado", "muy", "real", "realmente", "suficiente", "menos", "más", "poco", "mucho", "tan", "solo", "bastante", "varios", "ninguno"],
+            "suffix_2g": ["suficiente", "lejos"],
+            "prefix_3g": ["no demasiado", "no muy", "no realmente", "no suficiente"],
+            "spec_2g": ["lirio de los valles", "flores de cementerio", "flores blancas", "pasado de moda", "gente mayor", "anciana", "limpiador de hogar", "poco fresco", "nada claro"],
+            "spec_3g": ["no huele bien", "huele de maravilla", "no huele mal", "huele fatal"]
+        }
+    },
+    "German": {
+        "stops": ["produkt", "geruch", "fühlen", "wirklich", "einfach", "wie", "wenig", "denken", "viel", "machen", "auch", "bisschen", "ziemlich", "etwas", "scheinen", "hervorrufen", "finden", "erinnern"],
+        "negation": ["nicht", "nicht zu", "weniger", "wenig", "nicht besonders", "gar nicht", "kein"],
+        "superlative": ["wirklich", "sehr", "genug", "ziemlich", "viele", "einfach", "mehr", "echt", "so", "zu"],
+        "rules": {
+            "prefix_2g": ["nicht", "zu", "sehr", "echt", "wirklich", "genug", "weniger", "mehr", "wenig", "viel", "so", "einfach", "ziemlich", "viele", "kein"],
+            "suffix_2g": ["genug", "weg"],
+            "prefix_3g": ["nicht zu", "nicht besonders", "nicht wirklich", "nicht genug"],
+            "spec_2g": ["maiglöckchen", "grabblume", "weiße blüten", "altmodisch", "ältere leute", "alte dame", "haushaltsreiniger", "nicht frisch", "unklar"],
+            "spec_3g": ["riecht nicht gut", "riecht richtig gut", "riecht nicht schlecht", "riecht extrem schlecht"]
+        }
+    },
+    "Portuguese": {
+        "stops": ["produto", "cheiro", "sentir", "realmente", "apenas", "como", "pouco", "pensar", "muito", "fazer", "também", "um pouco", "bastante", "algo", "parecer", "evocar", "encontrar", "lembrar"],
+        "negation": ["não", "não muito", "menos", "pouco", "não muito", "de jeito nenhum", "nem"],
+        "superlative": ["realmente", "muito", "suficiente", "bastante", "muitos", "apenas", "mais", "real", "tão", "demais"],
+        "rules": {
+            "prefix_2g": ["não", "demais", "muito", "real", "realmente", "suficiente", "menos", "mais", "pouco", "muito", "tão", "apenas", "bastante", "vários", "nenhum"],
+            "suffix_2g": ["suficiente", "longe"],
+            "prefix_3g": ["não muito", "não tão", "não realmente", "não suficiente"],
+            "spec_2g": ["lírio-do-vale", "flor de velório", "flores brancas", "cafona", "pessoas idosas", "senhorinha", "produto de limpeza", "poco fresco", "nada claro"],
+            "spec_3g": ["não cheira bem", "cheira muito bem", "não cheira mal", "cheira muito mal"]
+        }
+    },
+    "Italian": {
+        "stops": ["prodotto", "odore", "sentire", "veramente", "solo", "come", "piccolo", "pensare", "molto", "fare", "anche", "un po'", "piuttosto", "qualcosa", "sembrare", "evocare", "trovare", "ricordare"],
+        "negation": ["non", "non troppo", "meno", "poco", "mica tanto", "per niente", "nemmeno"],
+        "superlative": ["veramente", "molto", "abbastanza", "piuttosto", "molti", "solo", "più", "reale", "così", "troppo"],
+        "rules": {
+            "prefix_2g": ["non", "troppo", "molto", "reale", "veramente", "abbastanza", "meno", "più", "poco", "molto", "così", "solo", "piuttosto", "molti", "no"],
+            "suffix_2g": ["abbastanza", "via"],
+            "prefix_3g": ["non troppo", "non molto", "non veramente", "non abbastanza"],
+            "spec_2g": ["mughetto", "fiori da funerale", "fiori bianchi", "sorpassato", "persone anziane", "vecchia signora", "detersivo per casa", "poco fresco", "non limpido"],
+            "spec_3g": ["non profuma bene", "profuma moltissimo", "non puzza", "ha un cattivo odore"]
+        }
+    },
+    "Indonesian": {
+        "stops": ["produk", "bau", "rasa", "sangat", "cuma", "seperti", "sedikit", "pikir", "banyak", "buat", "juga", "agak", "lumayan", "sesuatu", "tampak", "membangkitkan", "temukan", "ingatkan"],
+        "negation": ["tidak", "tidak terlalu", "kurang", "sedikit", "tidak begitu", "sama sekali tidak", "bukan"],
+        "superlative": ["sangat", "amat", "cukup", "lumayan", "banyak", "cuma", "lebih", "nyata", "begitu", "terlalu"],
+        "rules": {
+            "prefix_2g": ["tidak", "terlalu", "sangat", "nyata", "sebenarnya", "cukup", "kurang", "lebih", "sedikit", "banyak", "begitu", "cuma", "lumayan", "beberapa", "bukan"],
+            "suffix_2g": ["cukup", "jauh"],
+            "prefix_3g": ["tidak terlalu", "tidak begitu", "tidak benar-benar", "tidak cukup"],
+            "spec_2g": ["bunga bakung", "bunga kamboja", "bunga putih", "jadul", "orang tua", "nenek-nenek", "pembersih lantai", "tidak segar", "tidak jelas"],
+            "spec_3g": ["kurang enak baunya", "wangi sekali", "tidak bau busuk", "bau banget"]
+        }
+    }
 }
 
 # --- NLP Engine ---
@@ -69,10 +146,8 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
     for w in words:
         lemma = lemmatizer.lemmatize(w)
         lemma = fragrance_merges.get(lemma, lemma)
-
         if lemma in custom_stops_set:
-            if lemma not in gram_influencers:
-                continue
+            if lemma not in gram_influencers: continue
             tokens.append(lemma)
         elif lemma not in base_stops or lemma in gram_influencers:
             tokens.append(lemma)
@@ -110,41 +185,29 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
 def get_sentiment_words(text_series):
     words = " ".join(text_series).split()
     if not words: return [], []
-    
-    # Count frequency for sorting relevance
     counts = Counter(words)
     unique_tokens = list(counts.keys())
-    
     scored = []
     for token in unique_tokens:
-        # Evaluate sentiment on the clean version (spaces), but keep token (underscores)
         eval_text = token.replace("_", " ")
         score = TextBlob(eval_text).sentiment.polarity
         scored.append({'token': token, 'score': score, 'freq': counts[token]})
-    
-    # Sort primarily by score intensity, secondarily by frequency
     pos = sorted([x for x in scored if x['score'] > 0.1], key=lambda x: (x['score'], x['freq']), reverse=True)[:10]
     neg = sorted([x for x in scored if x['score'] < -0.1], key=lambda x: (x['score'], x['freq']))[:10]
-    
     return [p['token'] for p in pos], [n['token'] for n in neg]
 
 def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
     all_tokens = " ".join(text_series).split()
     if not all_tokens: return [], []
     counts = Counter(all_tokens)
-    
     neg_captured, sup_captured = [], []
     neg_triggers = set([w.lower() for phrase in negation_prefixes for w in phrase.split()])
     sup_triggers = set([w.lower() for phrase in superlative_prefixes for w in phrase.split()])
-
     for token, freq in counts.items():
         if "_" in token:
             parts = token.lower().split("_")
-            if parts[0] in neg_triggers:
-                neg_captured.append((token, freq))
-            elif parts[0] in sup_triggers:
-                sup_captured.append((token, freq))
-    
+            if parts[0] in neg_triggers: neg_captured.append((token, freq))
+            elif parts[0] in sup_triggers: sup_captured.append((token, freq))
     top_neg = [item[0] for item in sorted(neg_captured, key=lambda x: x[1], reverse=True)[:10]]
     top_sup = [item[0] for item in sorted(sup_captured, key=lambda x: x[1], reverse=True)[:10]]
     return top_neg, top_sup
@@ -154,17 +217,11 @@ def generate_word_cloud(text_series, palette, shape):
     if not combined_text:
         fig, ax = plt.subplots(); ax.text(0.5, 0.5, "No text available", ha='center'); ax.axis("off")
         return fig
-    
     mask = None
     if shape == "Round":
         img = Image.new("L", (800, 800), 255)
         draw = ImageDraw.Draw(img); draw.ellipse((20,20,780,780), fill=0); mask = np.array(img)
-    
-    wc = WordCloud(
-        background_color="white", colormap=palette, mask=mask, 
-        width=800, height=500, collocations=False, regexp=r"\S+" 
-    ).generate(combined_text)
-    
+    wc = WordCloud(background_color="white", colormap=palette, mask=mask, width=800, height=500, collocations=False, regexp=r"\S+").generate(combined_text)
     fig, ax = plt.subplots(); ax.imshow(wc, interpolation='bilinear'); ax.axis("off")
     return fig
 
@@ -198,27 +255,33 @@ def run_fca(df, p_col, fmin, use_tfidf):
     col_coords = svd.components_.T * (np.std(row_coords) / (np.std(svd.components_.T) + 1e-9))
     return (row_coords, col_coords, products, words, svd.explained_variance_ratio_), None
 
-# --- UI Logic ---
-if 'gram_rules' not in st.session_state:
-    st.session_state.gram_rules = {
-        'prefix_2g': ["not", "too", "very", "real", "really", "enough", "less", "more", "little", "lot", "so", "just", "quite", "many", "no"],
-        'suffix_2g': ["enough", "away"], 
-        'prefix_3g': ["not too", "not very", "not real", "not enough"],
-        'spec_2g': ["lily valley", "funeral flower", "white flower", "old fashion", "old people", "old lady", "house cleaner", "not fresh", "not clean"],
-        'spec_3g': ["not smell good", "smell very good", "not smell bad", "smell very bad"],
-        'negation_list': ["not", "not too", "less", "little", "not very", "not at all", "no"],
-        'superlative_list': ["really", "very", "enough", "quite", "many", "just", "more", "real", "so", "too"]
-    }
-
+# --- UI Setup ---
 with st.sidebar:
     st.header("⚙️ Settings")
     uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
+    
+    dataset_lang = st.selectbox("Language:", list(LANGUAGE_PACKS.keys()))
+    
+    # Update session state based on language selection if not manually overridden
+    pack = LANGUAGE_PACKS[dataset_lang]
+    if 'current_lang' not in st.session_state or st.session_state.current_lang != dataset_lang:
+        st.session_state.current_lang = dataset_lang
+        st.session_state.custom_stop_list = pack['stops']
+        st.session_state.gram_rules = {
+            'prefix_2g': pack['rules']['prefix_2g'],
+            'suffix_2g': pack['rules']['suffix_2g'],
+            'prefix_3g': pack['rules']['prefix_3g'],
+            'spec_2g': pack['rules']['spec_2g'],
+            'spec_3g': pack['rules']['spec_3g'],
+            'negation_list': pack['negation'],
+            'superlative_list': pack['superlative']
+        }
+
     if uploaded_file:
         try:
             xl = pd.ExcelFile(uploaded_file)
             sheet = st.selectbox("Select Sheet:", xl.sheet_names)
             df_raw = pd.read_excel(uploaded_file, sheet_name=sheet)
-            st.subheader("🎯 Sub-Target Filter")
             filter_col = st.selectbox("Filter Column:", ["No Filter"] + list(df_raw.columns))
             target_indices = df_raw.index
             filter_label = "Total Sample"
@@ -228,17 +291,12 @@ with st.sidebar:
                 if selected_codes:
                     target_indices = df_raw[df_raw[filter_col].isin(selected_codes)].index
                     filter_label = f"{filter_col}: {', '.join(map(str, selected_codes))}"
-        except Exception as e:
-            st.error(f"Error: {e}"); st.stop()
+        except Exception as e: st.error(f"Error: {e}"); st.stop()
 
-        st.divider()
-        dataset_lang = st.selectbox("Language:", list(MULTILINGUAL_STOPWORDS.keys()))
-        if 'custom_stop_list' not in st.session_state:
-            st.session_state.custom_stop_list = MULTILINGUAL_STOPWORDS[dataset_lang]
-        fmin_global = st.slider("Min Word Frequency (for Cloud)", 1, 50, 5)
-        use_tfidf = st.toggle("Use TF-IDF Weighting", value=True)
-        shape_opt = st.radio("Cloud Shape", ["Rectangle", "Round"])
-        palette_opt = st.selectbox("Palette", ["copper", "GnBu", "RdPu", "viridis"])
+    fmin_global = st.slider("Min Word Frequency", 1, 50, 5)
+    use_tfidf = st.toggle("Use TF-IDF Weighting", value=True)
+    shape_opt = st.radio("Cloud Shape", ["Rectangle", "Round"])
+    palette_opt = st.selectbox("Palette", ["copper", "GnBu", "RdPu", "viridis"])
 
 tab1, tab2, tab3, tab4, tab6, tab5 = st.tabs(["📊 Single Product", "⚔️ Comparison", "🌐 Factorial Map", "🔍 Topic Lab", "🎯 Impact Lab", "🚫 Exclusions & Grams"])
 
@@ -247,7 +305,7 @@ if uploaded_file and 'df_raw' in locals():
     v_col = st.sidebar.selectbox("Verbatim Column", df_raw.columns)
     s_col = st.sidebar.selectbox("Preference Score (Optional)", ["None"] + list(df_raw.columns))
 
-    if st.sidebar.button("🚀 Run Analysis on Sub-Target"):
+    if st.sidebar.button("🚀 Run Analysis"):
         df_filtered = df_raw.loc[target_indices].dropna(subset=[v_col])
         df_filtered['cleaned'] = df_filtered[v_col].apply(lambda x: clean_text(x, st.session_state.custom_stop_list, dataset_lang, st.session_state.gram_rules))
         st.session_state['processed_df'] = df_filtered
@@ -262,49 +320,32 @@ if uploaded_file and 'df_raw' in locals():
             target_p = st.selectbox("Fragrance Focus", p_list)
             product_data = df[df[p_col].astype(str) == target_p]
             p_sub_cleaned = product_data['cleaned']
-
-            # Metrics & Visuals
             sent_val = product_data[v_col].apply(lambda x: TextBlob(str(x)).sentiment.polarity).mean()
             st.metric(f"Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
             st.progress((sent_val + 1) / 2)
-            
             c1, c2 = st.columns(2)
             with c1: st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
             with c2: 
                 tree_fig = generate_word_tree(p_sub_cleaned, fmin_global, palette_opt)
                 if tree_fig: st.pyplot(tree_fig)
                 else: st.warning("Not enough patterns.")
-
             st.divider()
-            st.markdown("🔍 **Olfactive Descriptors & Gram Radar (Top 10)**")
-            
-            # --- restored SENTIMENT LISTS ---
             pos_words, neg_words = get_sentiment_words(p_sub_cleaned)
             sl, sr = st.columns(2)
             with sl:
                 st.success("✨ **Positive Descriptors**")
-                if pos_words:
-                    for w in pos_words: st.write(f"- {w}")
-                else: st.write("None.")
+                for w in pos_words: st.write(f"- {w}")
             with sr:
                 st.error("⚠️ **Negative Descriptors**")
-                if neg_words:
-                    for w in neg_words: st.write(f"- {w}")
-                else: st.write("None.")
-            
-            # --- GRAM LISTS ---
+                for w in neg_words: st.write(f"- {w}")
             neg_grams, sup_grams = get_gram_categories(p_sub_cleaned, st.session_state.gram_rules['negation_list'], st.session_state.gram_rules['superlative_list'])
             gl, gr = st.columns(2)
             with gl:
                 st.warning("🚫 **Negation List**")
-                if neg_grams:
-                    for g in neg_grams: st.write(f"- {g}")
-                else: st.write("None.")
+                for g in neg_grams: st.write(f"- {g}")
             with gr:
                 st.info("💎 **Superlative List**")
-                if sup_grams:
-                    for g in sup_grams: st.write(f"- {g}")
-                else: st.write("None.")
+                for g in sup_grams: st.write(f"- {g}")
 
         with tab2:
             st.subheader("⚔️ Scent Comparison")
