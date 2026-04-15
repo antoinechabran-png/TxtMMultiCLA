@@ -74,20 +74,22 @@ lemmatizer = setup_nltk()
 
 def clean_text(text, custom_stops, lang_choice, gram_rules):
     if not text or pd.isna(text): return ""
-    lang_map = {"English": "english", "French": "french", "German": "german", "Spanish": "spanish", "Portuguese": "portuguese", "Italian": "italian", "Indonesian": "indonesian"}
+    lang_map = {"English": "english", "French": "french", "Spanish": "spanish"}
     try:
         base_stops = set(nltk.corpus.stopwords.words(lang_map.get(lang_choice, "english")))
     except:
         base_stops = set()
 
     custom_stops_set = set([str(x).strip().lower() for x in custom_stops])
+    
+    # Extract influencers safely
     gram_influencers = set(
-        gram_rules['prefix_2g'] + gram_rules['suffix_2g'] +
-        [w for phrase in gram_rules['prefix_3g'] for w in phrase.split()] +
-        [w for phrase in gram_rules['spec_2g'] for w in phrase.split()] +
-        [w for phrase in gram_rules['spec_3g'] for w in phrase.split()] +
-        [w for phrase in gram_rules['negation_list'] for w in phrase.split()] +
-        [w for phrase in gram_rules['superlative_list'] for w in phrase.split()]
+        gram_rules.get('prefix_2g', []) + gram_rules.get('suffix_2g', []) +
+        [w for phrase in gram_rules.get('prefix_3g', []) for w in phrase.split()] +
+        [w for phrase in gram_rules.get('spec_2g', []) for w in phrase.split()] +
+        [w for phrase in gram_rules.get('spec_3g', []) for w in phrase.split()] +
+        [w for phrase in gram_rules.get('negation_list', []) for w in phrase.split()] +
+        [w for phrase in gram_rules.get('superlative_list', []) for w in phrase.split()]
     )
 
     fragrance_merges = {"freshness": "fresh", "freshly": "fresh", "fruity": "fruit", "smelling": "smell", "scented": "scent", "floral": "flower", "flowers": "flower", "cleanliness": "clean", "cleaning": "clean"}
@@ -112,16 +114,16 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
         if i < len(tokens) - 2:
             trigram_raw = f"{tokens[i]} {tokens[i+1]} {tokens[i+2]}"
             prefix_2g_part = f"{tokens[i]} {tokens[i+1]}"
-            if trigram_raw in gram_rules['spec_3g'] or prefix_2g_part in gram_rules['prefix_3g']:
+            if trigram_raw in gram_rules.get('spec_3g', []) or prefix_2g_part in gram_rules.get('prefix_3g', []):
                 processed_tokens.append(f"{tokens[i]}_{tokens[i+1]}_{tokens[i+2]}")
                 i += 3
                 match_found = True
 
         if not match_found and i < len(tokens) - 1:
             bigram_raw = f"{tokens[i]} {tokens[i+1]}"
-            if (bigram_raw in gram_rules['spec_2g'] or
-                tokens[i] in gram_rules['prefix_2g'] or
-                tokens[i+1] in gram_rules['suffix_2g']):
+            if (bigram_raw in gram_rules.get('spec_2g', []) or
+                tokens[i] in gram_rules.get('prefix_2g', []) or
+                tokens[i+1] in gram_rules.get('suffix_2g', [])):
                 processed_tokens.append(f"{tokens[i]}_{tokens[i+1]}")
                 i += 2
                 match_found = True
@@ -148,159 +150,73 @@ def generate_word_cloud(text_series, palette, shape):
 
 def generate_word_tree_advanced(text_series, min_freq, palette):
     """
-    High-quality Word Tree matching Target style:
-    - Well-separated clusters with distinct pastel colors
-    - Clean non-overlapping convex hull regions
-    - Font size proportional to frequency
-    - No bounding boxes on text
+    FIXED Word Tree Layout:
+    - Reduced k-value (0.3) to prevent coordinate explosion.
+    - Increased iterations for better spacing.
+    - Added subtle text bboxes for readability.
     """
     valid = [t for t in text_series if len(str(t).split()) > 0]
-    if not valid:
-        return None
+    if not valid: return None
+    
     try:
         vec = CountVectorizer(min_df=min_freq, token_pattern=r"(?u)\b\S+\b")
         mtx = vec.fit_transform(valid)
         words = vec.get_feature_names_out()
         word_counts = np.asarray(mtx.sum(axis=0)).flatten()
         count_dict = dict(zip(words, word_counts))
-        if len(words) < 2:
-            return None
+        if len(words) < 2: return None
 
         adj = (mtx.T * mtx)
         adj.setdiag(0)
         G = nx.from_scipy_sparse_array(adj)
         G = nx.relabel_nodes(G, {i: w for i, w in enumerate(words)})
-
-        # Remove very weak edges to get cleaner cluster separation
-        weak_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get('weight', 1) < 2]
-        G.remove_edges_from(weak_edges)
-
-        # Remove isolated nodes after pruning
         G.remove_nodes_from(list(nx.isolates(G)))
 
-        if len(G.nodes) < 2:
-            return None
+        if len(G.nodes) < 2: return None
 
         partition = community_louvain.best_partition(G)
-
-        # High k value for strong geographic separation between clusters
-        pos = nx.spring_layout(G, k=4.0, seed=42, iterations=300)
+        
+        # --- FIX: Adjusted Layout Parameters ---
+        pos = nx.spring_layout(G, k=0.3, seed=42, iterations=500)
 
         fig, ax = plt.subplots(figsize=(14, 10), facecolor='white')
         ax.set_facecolor('white')
 
-        # Distinct pastel colors matching the Target aesthetic
-        PASTEL_COLORS = [
-            "#A8D8B9",  # soft green
-            "#F4B8C1",  # soft pink/rose
-            "#B5D0E8",  # soft blue
-            "#D4E8A8",  # soft yellow-green
-            "#C8B8E8",  # soft purple/lavender
-            "#F4D8A8",  # soft peach/amber
-            "#A8D8D8",  # soft teal
-            "#E8C8B8",  # soft coral
-        ]
-
+        PASTEL_COLORS = ["#A8D8B9", "#F4B8C1", "#B5D0E8", "#D4E8A8", "#C8B8E8", "#F4D8A8", "#A8D8D8", "#E8C8B8"]
         unique_comms = sorted(list(set(partition.values())))
 
-        # --- Draw hull regions FIRST (behind everything) ---
+        # Draw hull regions
         for i, comm in enumerate(unique_comms):
             nodes_in_comm = [n for n in G.nodes() if partition[n] == comm]
-            if not nodes_in_comm:
-                continue
-
+            if not nodes_in_comm: continue
             color = PASTEL_COLORS[i % len(PASTEL_COLORS)]
+            pts = np.array([pos[n] for n in nodes_in_comm])
 
-            # Estimate text extents for padding hull around actual rendered text
-            pts = []
-            max_c = max(word_counts) if len(word_counts) > 0 else 1
-            for n in nodes_in_comm:
-                x, y = pos[n]
-                fsize = 9 + (count_dict.get(n, 1) / max_c) * 22
-                char_w = fsize * 0.55
-                text_w = len(n.replace("_", "\n").split("\n")[0]) * char_w
-                text_h = fsize * 1.2
-
-                # Add corner points of approximate text bounding box
-                pts.append([x - text_w / 2, y - text_h / 2])
-                pts.append([x + text_w / 2, y - text_h / 2])
-                pts.append([x - text_w / 2, y + text_h / 2])
-                pts.append([x + text_w / 2, y + text_h / 2])
-
-            pts = np.array(pts)
-
-            if len(nodes_in_comm) >= 2 and len(pts) >= 4:
-                # Expand outward from centroid for hull padding
-                cent = np.mean(pts, axis=0)
-                expanded_pts = pts + 0.12 * (pts - cent)
-
+            if len(pts) >= 3:
                 try:
-                    hull = ConvexHull(expanded_pts)
-                    hull_verts = expanded_pts[hull.vertices]
-
-                    polygon = patches.Polygon(
-                        hull_verts,
-                        closed=True,
-                        facecolor=color,
-                        edgecolor=color,
-                        alpha=0.35,
-                        linewidth=1.5,
-                        zorder=0,
-                        joinstyle='round',
-                        capstyle='round'
-                    )
+                    hull = ConvexHull(pts)
+                    polygon = patches.Polygon(pts[hull.vertices], closed=True, facecolor=color, alpha=0.3, edgecolor=color, linewidth=1.5, zorder=0)
                     ax.add_patch(polygon)
-                except Exception:
-                    center = np.mean(pts, axis=0)
-                    radius = np.max(np.linalg.norm(pts - center, axis=1)) + 0.05
-                    circle = plt.Circle(center, radius, color=color, alpha=0.3, zorder=0)
-                    ax.add_artist(circle)
-            elif nodes_in_comm:
+                except: pass
+            elif len(pts) > 0:
                 center = np.mean(pts, axis=0)
-                circle = plt.Circle(center, 0.12, color=color, alpha=0.3, zorder=0)
+                circle = plt.Circle(center, 0.1, color=color, alpha=0.2, zorder=0)
                 ax.add_artist(circle)
 
-        # --- Draw edges (thin, light grey) ---
-        weights = [G[u][v].get('weight', 1) for u, v in G.edges()]
-        if weights:
-            max_w = max(weights) if max(weights) > 0 else 1
-            norm_widths = [(w / max_w) * 3 + 0.3 for w in weights]
-            nx.draw_networkx_edges(
-                G, pos,
-                width=norm_widths,
-                alpha=0.25,
-                edge_color='#aaaaaa',
-                ax=ax,
-                style='solid'
-            )
+        # Draw edges
+        nx.draw_networkx_edges(G, pos, alpha=0.15, edge_color='#aaaaaa', ax=ax)
 
-        # --- Draw word labels (clean, no boxes) ---
-        max_c = max(word_counts) if len(word_counts) > 0 else 1
+        # Draw labels
+        max_c = max(word_counts)
         for node, (x, y) in pos.items():
-            freq_ratio = count_dict.get(node, 1) / max_c
-            fsize = 9 + freq_ratio * 22  # range: 9px (rare) to 31px (most common)
-            weight = 'bold' if freq_ratio > 0.3 else 'normal'
-            display_text = node.replace("_", " ")
+            fsize = 10 + (count_dict[node] / max_c) * 20
+            ax.text(x, y, node.replace("_", " "), fontsize=fsize, ha='center', va='center',
+                    bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', pad=0.3),
+                    color='#222222', zorder=3)
 
-            ax.text(
-                x, y,
-                display_text,
-                fontsize=fsize,
-                fontweight=weight,
-                ha='center',
-                va='center',
-                color='#111111',
-                zorder=3,
-            )
-
-        ax.set_xlim(ax.get_xlim()[0] - 0.3, ax.get_xlim()[1] + 0.3)
-        ax.set_ylim(ax.get_ylim()[0] - 0.3, ax.get_ylim()[1] + 0.3)
         plt.axis('off')
-        plt.tight_layout(pad=0.5)
         return fig
-
     except Exception as e:
-        print(f"Word tree error: {e}")
         return None
 
 def run_fca(df, p_col, fmin, use_tfidf):
@@ -386,7 +302,7 @@ if uploaded_file and 'df_raw' in locals():
             st.write("### 🌳 Olfactive Word Tree")
             tree_fig = generate_word_tree_advanced(p_sub_cleaned, fmin_global, palette_opt)
             if tree_fig: st.pyplot(tree_fig)
-            else: st.warning("Not enough data for tree.")
+            else: st.warning("Not enough data for tree with current Min Frequency setting.")
 
             st.divider()
             st.write("### ☁️ Classic Wordcloud")
@@ -426,7 +342,7 @@ if uploaded_file and 'df_raw' in locals():
                 vec = TfidfVectorizer(max_features=500, token_pattern=r"(?u)\b\S+\b")
                 mtx = vec.fit_transform(df['cleaned'])
                 nmf = NMF(n_components=num_t, random_state=42, init='nndsvd').fit(mtx)
-                doc_topic, fn = nmf.transform(mtx), vec.get_feature_names_out()
+                fn = vec.get_feature_names_out()
                 cols = st.columns(num_t)
                 for i, topic in enumerate(nmf.components_):
                     with cols[i % num_t]:
@@ -450,16 +366,14 @@ if uploaded_file and 'df_raw' in locals():
                         fig_pos, ax_pos = plt.subplots(figsize=(5, 4))
                         ax_pos.barh(top10['Word'], top10['Impact'], color='steelblue')
                         ax_pos.invert_yaxis()
-                        plt.tight_layout()
-                        st.pyplot(fig_pos)
+                        plt.tight_layout(); st.pyplot(fig_pos)
                     with c2:
                         st.write("📉 Negative Drivers")
                         bot10 = impact_df.tail(10)
                         fig_neg, ax_neg = plt.subplots(figsize=(5, 4))
                         ax_neg.barh(bot10['Word'], bot10['Impact'], color='salmon')
                         ax_neg.invert_yaxis()
-                        plt.tight_layout()
-                        st.pyplot(fig_neg)
+                        plt.tight_layout(); st.pyplot(fig_neg)
                 except Exception as e: st.error(f"Error: {e}")
             else:
                 st.info("Select a Preference Score column in the sidebar to enable this tab.")
@@ -470,8 +384,8 @@ if uploaded_file and 'df_raw' in locals():
             stops = st.session_state.get('custom_stop_list', [])
             txt_stops = col_left.text_area("Stopwords", value=", ".join(stops), height=150)
             g = st.session_state.gram_rules
-            p2 = col_right.text_input("Prefix 2-gram", ", ".join(g['prefix_2g']))
-            a2 = col_right.text_input("Special 2-gram", ", ".join(g['spec_2g']))
+            p2 = col_right.text_input("Prefix 2-gram", ", ".join(g.get('prefix_2g', [])))
+            a2 = col_right.text_input("Special 2-gram", ", ".join(g.get('spec_2g', [])))
             if st.button("💾 Apply & Re-Process"):
                 st.session_state.custom_stop_list = [x.strip().lower() for x in txt_stops.split(",") if x.strip()]
                 st.rerun()
