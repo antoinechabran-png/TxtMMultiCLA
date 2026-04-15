@@ -133,36 +133,6 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
 
     return " ".join(processed_tokens)
 
-def get_sentiment_words(text_series):
-    words = " ".join(text_series).split()
-    if not words: return [], []
-    counts = Counter(words)
-    unique_tokens = list(counts.keys())
-    scored = []
-    for token in unique_tokens:
-        eval_text = token.replace("_", " ")
-        score = TextBlob(eval_text).sentiment.polarity
-        scored.append({'token': token, 'score': score, 'freq': counts[token]})
-    pos = sorted([x for x in scored if x['score'] > 0.1], key=lambda x: (x['score'], x['freq']), reverse=True)[:10]
-    neg = sorted([x for x in scored if x['score'] < -0.1], key=lambda x: (x['score'], x['freq']))[:10]
-    return [p['token'] for p in pos], [n['token'] for n in neg]
-
-def get_gram_categories(text_series, negation_prefixes, superlative_prefixes):
-    all_tokens = " ".join(text_series).split()
-    if not all_tokens: return [], []
-    counts = Counter(all_tokens)
-    neg_captured, sup_captured = [], []
-    neg_triggers = set([w.lower() for phrase in negation_prefixes for w in phrase.split()])
-    sup_triggers = set([w.lower() for phrase in superlative_prefixes for w in phrase.split()])
-    for token, freq in counts.items():
-        if "_" in token:
-            parts = token.lower().split("_")
-            if parts[0] in neg_triggers: neg_captured.append((token, freq))
-            elif parts[0] in sup_triggers: sup_captured.append((token, freq))
-    top_neg = [item[0] for item in sorted(neg_captured, key=lambda x: x[1], reverse=True)[:10]]
-    top_sup = [item[0] for item in sorted(sup_captured, key=lambda x: x[1], reverse=True)[:10]]
-    return top_neg, top_sup
-
 def generate_word_cloud(text_series, palette, shape):
     combined_text = " ".join(text_series).strip()
     if not combined_text:
@@ -177,7 +147,7 @@ def generate_word_cloud(text_series, palette, shape):
     return fig
 
 def generate_word_tree_advanced(text_series, min_freq, palette):
-    """Full stylised Word Tree: Font size by freq, Thickness by strength, Community hulls."""
+    """High geographic separation Word Tree with clean background and no text boxes."""
     valid = [t for t in text_series if len(str(t).split()) > 0]
     if not valid: return None
     try:
@@ -193,41 +163,45 @@ def generate_word_tree_advanced(text_series, min_freq, palette):
         G = nx.relabel_nodes(G, {i: w for i, w in enumerate(words)})
         partition = community_louvain.best_partition(G)
         
-        fig, ax = plt.subplots(figsize=(14, 10), facecolor='white')
-        pos = nx.spring_layout(G, k=0.7, seed=42, iterations=100)
+        # INCREASED REPULSION (k=2.0) for more geographic spread
+        pos = nx.spring_layout(G, k=2.0, seed=42, iterations=150)
+        
+        fig, ax = plt.subplots(figsize=(16, 12), facecolor='white')
+        ax.set_facecolor('white')
         
         cmap = plt.get_cmap(palette)
         unique_comms = sorted(list(set(partition.values())))
         
-        # Draw Background Community Hulls
+        # Draw Background Community Hulls with more padding
         for i, comm in enumerate(unique_comms):
             nodes = [n for n in G.nodes() if partition[n] == comm]
             color = cmap(i / max(1, len(unique_comms)-1))
             if len(nodes) >= 3:
                 pts = np.array([pos[n] for n in nodes])
                 cent = np.mean(pts, axis=0)
-                pts_padded = pts + 0.15 * (pts - cent) # Expansion
+                # Expand hull by 30% to clear space for text
+                pts_padded = pts + 0.3 * (pts - cent) 
                 hull = ConvexHull(pts_padded)
-                polygon = patches.Polygon(pts_padded[hull.vertices], closed=True, alpha=0.15, color=color, zorder=0)
+                polygon = patches.Polygon(pts_padded[hull.vertices], closed=True, alpha=0.2, color=color, zorder=0, joinstyle='round')
                 ax.add_patch(polygon)
             elif len(nodes) > 0:
                 for n in nodes:
-                    circle = plt.Circle(pos[n], 0.12, color=color, alpha=0.1, zorder=0)
+                    circle = plt.Circle(pos[n], 0.2, color=color, alpha=0.15, zorder=0)
                     ax.add_artist(circle)
 
-        # Draw Edges (Strength)
+        # Draw Edges (Thicker light grey lines)
         weights = [G[u][v]['weight'] for u, v in G.edges()]
         if weights:
             max_w = max(weights)
-            norm_widths = [(w / max_w) * 6 for w in weights]
-            nx.draw_networkx_edges(G, pos, width=norm_widths, alpha=0.25, edge_color='#cccccc', ax=ax)
+            norm_widths = [(w / max_w) * 8 for w in weights]
+            nx.draw_networkx_edges(G, pos, width=norm_widths, alpha=0.3, edge_color='#cccccc', ax=ax)
 
-        # Draw Labels (Size)
+        # Draw Labels (Clean text, no boxes, size by freq)
         max_c = max(word_counts)
         for node, (x, y) in pos.items():
-            fsize = 9 + (count_dict[node] / max_c) * 18
+            fsize = 11 + (count_dict[node] / max_c) * 22
             ax.text(x, y, node.replace("_", "\n"), fontsize=fsize, ha='center', va='center', fontweight='bold',
-                    bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=0.3), zorder=2)
+                    color='black', zorder=2)
         
         plt.axis('off')
         return fig
@@ -314,7 +288,6 @@ if uploaded_file and 'df_raw' in locals():
             st.metric(f"Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
             
             st.write("### 🌳 Olfactive Word Tree")
-            st.caption("Community clusters by color. Word size = Frequency. Link thickness = Strength.")
             tree_fig = generate_word_tree_advanced(p_sub_cleaned, fmin_global, palette_opt)
             if tree_fig: st.pyplot(tree_fig)
             else: st.warning("Not enough data for tree.")
