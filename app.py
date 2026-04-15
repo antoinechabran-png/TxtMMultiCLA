@@ -225,21 +225,45 @@ def generate_word_cloud(text_series, palette, shape):
     fig, ax = plt.subplots(); ax.imshow(wc, interpolation='bilinear'); ax.axis("off")
     return fig
 
-def generate_word_tree(text_series, min_freq, palette):
-    valid = [t for t in text_series if len(t.split()) > 0]
+def generate_word_tree_advanced(text_series, min_freq, palette):
+    """Advanced Word Tree with community blobs and weighted edges (thickness)."""
+    valid = [t for t in text_series if len(str(t).split()) > 0]
     if not valid: return None
     try:
         vec = CountVectorizer(min_df=min_freq, token_pattern=r"(?u)\b\S+\b")
         mtx = vec.fit_transform(valid); words = vec.get_feature_names_out()
         if len(words) < 2: return None
-        adj = (mtx.T * mtx); adj.setdiag(0); G = nx.from_scipy_sparse_array(adj)
+        
+        # Co-occurrence matrix logic
+        adj = (mtx.T * mtx); adj.setdiag(0)
+        G = nx.from_scipy_sparse_array(adj)
         G = nx.relabel_nodes(G, {i: w for i, w in enumerate(words)})
-        T = nx.maximum_spanning_tree(G)
-        fig, ax = plt.subplots(figsize=(8,6))
-        pos = nx.spring_layout(T, k=1.5, seed=42); part = community_louvain.best_partition(T)
-        nx.draw_networkx_nodes(T, pos, node_size=2000, node_color=list(part.values()), cmap=palette, alpha=0.8)
-        nx.draw_networkx_labels(T, pos, font_size=8, font_weight='bold'); nx.draw_networkx_edges(T, pos, alpha=0.2)
-        plt.axis('off'); return fig
+        
+        # Community detection for coloring clusters
+        partition = community_louvain.best_partition(G)
+        
+        fig, ax = plt.subplots(figsize=(12, 9))
+        pos = nx.spring_layout(G, k=0.5, seed=42)
+        
+        # Line Thickness based on frequency (weight)
+        weights = [G[u][v]['weight'] for u, v in G.edges()]
+        max_w = max(weights) if weights else 1
+        normalized_weights = [(w / max_w) * 6 for w in weights] 
+        
+        # Draw community blobs in background
+        for comm in set(partition.values()):
+            nodes = [n for n in G.nodes() if partition[n] == comm]
+            if len(nodes) > 1:
+                pts = np.array([pos[n] for n in nodes])
+                ax.scatter(pts[:,0], pts[:,1], s=8000, alpha=0.1)
+
+        # Draw Graph
+        nx.draw_networkx_edges(G, pos, width=normalized_weights, alpha=0.2, edge_color='gray')
+        nx.draw_networkx_nodes(G, pos, node_size=2500, node_color=list(partition.values()), cmap=palette, alpha=0.9)
+        nx.draw_networkx_labels(G, pos, font_size=9, font_weight='bold')
+        
+        plt.axis('off')
+        return fig
     except: return None
 
 def run_fca(df, p_col, fmin, use_tfidf):
@@ -262,7 +286,6 @@ with st.sidebar:
     
     dataset_lang = st.selectbox("Language:", list(LANGUAGE_PACKS.keys()))
     
-    # Update session state based on language selection if not manually overridden
     pack = LANGUAGE_PACKS[dataset_lang]
     if 'current_lang' not in st.session_state or st.session_state.current_lang != dataset_lang:
         st.session_state.current_lang = dataset_lang
@@ -320,15 +343,25 @@ if uploaded_file and 'df_raw' in locals():
             target_p = st.selectbox("Fragrance Focus", p_list)
             product_data = df[df[p_col].astype(str) == target_p]
             p_sub_cleaned = product_data['cleaned']
+            
             sent_val = product_data[v_col].apply(lambda x: TextBlob(str(x)).sentiment.polarity).mean()
             st.metric(f"Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
             st.progress((sent_val + 1) / 2)
-            c1, c2 = st.columns(2)
-            with c1: st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
-            with c2: 
-                tree_fig = generate_word_tree(p_sub_cleaned, fmin_global, palette_opt)
-                if tree_fig: st.pyplot(tree_fig)
-                else: st.warning("Not enough patterns.")
+            
+            # Layout updated to put tree below wordcloud
+            st.write("### ☁️ Olfactive Wordcloud")
+            st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
+            
+            st.divider()
+            
+            st.write("### 🌳 Advanced Word Tree")
+            st.caption("Lines thickness represents link strength. Colors indicate olfactive territories.")
+            tree_fig = generate_word_tree_advanced(p_sub_cleaned, fmin_global, palette_opt)
+            if tree_fig: 
+                st.pyplot(tree_fig)
+            else: 
+                st.warning("Not enough patterns for a tree. Try reducing Min Word Frequency.")
+            
             st.divider()
             pos_words, neg_words = get_sentiment_words(p_sub_cleaned)
             sl, sr = st.columns(2)
@@ -338,6 +371,7 @@ if uploaded_file and 'df_raw' in locals():
             with sr:
                 st.error("⚠️ **Negative Descriptors**")
                 for w in neg_words: st.write(f"- {w}")
+            
             neg_grams, sup_grams = get_gram_categories(p_sub_cleaned, st.session_state.gram_rules['negation_list'], st.session_state.gram_rules['superlative_list'])
             gl, gr = st.columns(2)
             with gl:
@@ -356,7 +390,7 @@ if uploaded_file and 'df_raw' in locals():
             if not d_a.empty and not d_b.empty:
                 sim = float(cosine_similarity(TfidfVectorizer(token_pattern=r"(?u)\b\S+\b").fit_transform([" ".join(d_a), " ".join(d_b)]))[0][1])
                 st.metric("Olfactive Similarity", f"{round(sim*100, 1)}%")
-                st.progress(sim) # Re-added progress bar
+                st.progress(sim)
                 comp_cols[0].pyplot(generate_word_cloud(d_a, palette_opt, shape_opt))
                 comp_cols[1].pyplot(generate_word_cloud(d_b, palette_opt, shape_opt))
 
@@ -388,9 +422,7 @@ if uploaded_file and 'df_raw' in locals():
                     with cols[i % num_t]:
                         top_words = [fn[j].replace("_", " ") for j in topic.argsort()[-7:]]
                         st.info(f"**Theme {i+1}**\n\n" + ", ".join(top_words))
-                        # Primary (Closest)
                         st.success(f"✅ **Primary:** {df.iloc[doc_topic[:, i].argmax()][p_col]}")
-                        # Furthest (Outlier) - Re-added
                         st.error(f"❌ **Outlier:** {df.iloc[doc_topic[:, i].argmin()][p_col]}")
 
         with tab6:
@@ -401,35 +433,24 @@ if uploaded_file and 'df_raw' in locals():
                     df_imp = df.dropna(subset=[pref_col, 'cleaned']).loc[lambda x: x['cleaned'] != ""]
                     vec_imp = CountVectorizer(min_df=3, binary=True, token_pattern=r"(?u)\b\S+\b")
                     X_imp, y_imp = vec_imp.fit_transform(df_imp['cleaned']), df_imp[pref_col]
-                    
-                    # Analysis
                     model = Ridge(alpha=1.0).fit(X_imp, y_imp)
                     impact_df = pd.DataFrame({
                         'Word': [w.replace("_", " ") for w in vec_imp.get_feature_names_out()], 
                         'Impact': model.coef_
                     }).sort_values(by='Impact', ascending=False)
-                    
-                    # Top 15 Pos / Top 15 Neg
-                    pos_impact = impact_df.head(15).iloc[::-1] # Reverse for plot
+                    pos_impact = impact_df.head(15).iloc[::-1]
                     neg_impact = impact_df.tail(15)
-                    
-                    # Visual Interface
                     c1, c2 = st.columns(2)
-                    
                     with c1:
                         st.write("📈 **Top 15 Positive Drivers**")
                         fig_p, ax_p = plt.subplots(figsize=(6, 8))
                         ax_p.barh(pos_impact['Word'], pos_impact['Impact'], color='#2ecc71')
-                        ax_p.set_title("Increases Preference Score")
                         st.pyplot(fig_p)
-                        
                     with c2:
                         st.write("📉 **Top 15 Negative Drivers**")
                         fig_n, ax_n = plt.subplots(figsize=(6, 8))
                         ax_n.barh(neg_impact['Word'], neg_impact['Impact'], color='#e74c3c')
-                        ax_n.set_title("Decreases Preference Score")
                         st.pyplot(fig_n)
-                        
                 except Exception as e: st.error(f"Error: {e}")
             else: st.warning("Select Preference Score column.")
 
