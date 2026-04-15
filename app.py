@@ -6,6 +6,8 @@ import networkx as nx
 from community import community_louvain
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from scipy.spatial import ConvexHull
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.decomposition import TruncatedSVD, NMF
@@ -57,54 +59,6 @@ LANGUAGE_PACKS = {
             "spec_2g": ["lirio de los valles", "flores de cementerio", "flores blancas", "pasado de moda", "gente mayor", "anciana", "limpiador de hogar", "poco fresco", "nada claro"],
             "spec_3g": ["no huele bien", "huele de maravilla", "no huele mal", "huele fatal"]
         }
-    },
-    "German": {
-        "stops": ["produkt", "geruch", "fühlen", "wirklich", "einfach", "wie", "wenig", "denken", "viel", "machen", "auch", "bisschen", "ziemlich", "etwas", "scheinen", "hervorrufen", "finden", "erinnern"],
-        "negation": ["nicht", "nicht zu", "weniger", "wenig", "nicht besonders", "gar nicht", "kein"],
-        "superlative": ["wirklich", "sehr", "genug", "ziemlich", "viele", "einfach", "mehr", "echt", "so", "zu"],
-        "rules": {
-            "prefix_2g": ["nicht", "zu", "sehr", "echt", "wirklich", "genug", "weniger", "mehr", "wenig", "viel", "so", "einfach", "ziemlich", "viele", "kein"],
-            "suffix_2g": ["genug", "weg"],
-            "prefix_3g": ["nicht zu", "nicht besonders", "nicht wirklich", "nicht genug"],
-            "spec_2g": ["maiglöckchen", "grabblume", "weiße blüten", "altmodisch", "ältere leute", "alte dame", "haushaltsreiniger", "nicht frisch", "unklar"],
-            "spec_3g": ["riecht nicht gut", "riecht richtig gut", "riecht nicht schlecht", "riecht extrem schlecht"]
-        }
-    },
-    "Portuguese": {
-        "stops": ["produto", "cheiro", "sentir", "realmente", "apenas", "como", "pouco", "pensar", "muito", "fazer", "também", "um pouco", "bastante", "algo", "parecer", "evocar", "encontrar", "lembrar"],
-        "negation": ["não", "não muito", "menos", "pouco", "não muito", "de jeito nenhum", "nem"],
-        "superlative": ["realmente", "muito", "suficiente", "bastante", "muitos", "apenas", "mais", "real", "tão", "demais"],
-        "rules": {
-            "prefix_2g": ["não", "demais", "muito", "real", "realmente", "suficiente", "menos", "mais", "pouco", "muito", "tão", "apenas", "bastante", "vários", "nenhum"],
-            "suffix_2g": ["suficiente", "longe"],
-            "prefix_3g": ["não muito", "não tão", "não realmente", "não suficiente"],
-            "spec_2g": ["lírio-do-vale", "flor de velório", "flores brancas", "cafona", "pessoas idosas", "senhorinha", "produto de limpeza", "poco fresco", "nada claro"],
-            "spec_3g": ["não cheira bem", "cheira muito bem", "não cheira mal", "cheira muito mal"]
-        }
-    },
-    "Italian": {
-        "stops": ["prodotto", "odore", "sentire", "veramente", "solo", "come", "piccolo", "pensare", "molto", "fare", "anche", "un po'", "piuttosto", "qualcosa", "sembrare", "evocare", "trovare", "ricordare"],
-        "negation": ["non", "non troppo", "meno", "poco", "mica tanto", "per niente", "nemmeno"],
-        "superlative": ["veramente", "molto", "abbastanza", "piuttosto", "molti", "solo", "più", "reale", "così", "troppo"],
-        "rules": {
-            "prefix_2g": ["non", "troppo", "molto", "reale", "veramente", "abbastanza", "meno", "più", "poco", "molto", "così", "solo", "piuttosto", "molti", "no"],
-            "suffix_2g": ["abbastanza", "via"],
-            "prefix_3g": ["non troppo", "non molto", "non veramente", "non abbastanza"],
-            "spec_2g": ["mughetto", "fiori da funerale", "fiori bianchi", "sorpassato", "persone anziane", "vecchia signora", "detersivo per casa", "poco fresco", "non limpido"],
-            "spec_3g": ["non profuma bene", "profuma moltissimo", "non puzza", "ha un cattivo odore"]
-        }
-    },
-    "Indonesian": {
-        "stops": ["produk", "bau", "rasa", "sangat", "cuma", "seperti", "sedikit", "pikir", "banyak", "buat", "juga", "agak", "lumayan", "sesuatu", "tampak", "membangkitkan", "temukan", "ingatkan"],
-        "negation": ["tidak", "tidak terlalu", "kurang", "sedikit", "tidak begitu", "sama sekali tidak", "bukan"],
-        "superlative": ["sangat", "amat", "cukup", "lumayan", "banyak", "cuma", "lebih", "nyata", "begitu", "terlalu"],
-        "rules": {
-            "prefix_2g": ["tidak", "terlalu", "sangat", "nyata", "sebenarnya", "cukup", "kurang", "lebih", "sedikit", "banyak", "begitu", "cuma", "lumayan", "beberapa", "bukan"],
-            "suffix_2g": ["cukup", "jauh"],
-            "prefix_3g": ["tidak terlalu", "tidak begitu", "tidak benar-benar", "tidak cukup"],
-            "spec_2g": ["bunga bakung", "bunga kamboja", "bunga putih", "jadul", "orang tua", "nenek-nenek", "pembersih lantai", "tidak segar", "tidak jelas"],
-            "spec_3g": ["kurang enak baunya", "wangi sekali", "tidak bau busuk", "bau banget"]
-        }
     }
 }
 
@@ -127,10 +81,8 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
         base_stops = set()
 
     custom_stops_set = set([str(x).strip().lower() for x in custom_stops])
-
     gram_influencers = set(
-        gram_rules['prefix_2g'] +
-        gram_rules['suffix_2g'] +
+        gram_rules['prefix_2g'] + gram_rules['suffix_2g'] +
         [w for phrase in gram_rules['prefix_3g'] for w in phrase.split()] +
         [w for phrase in gram_rules['spec_2g'] for w in phrase.split()] +
         [w for phrase in gram_rules['spec_3g'] for w in phrase.split()] +
@@ -139,7 +91,6 @@ def clean_text(text, custom_stops, lang_choice, gram_rules):
     )
 
     fragrance_merges = {"freshness": "fresh", "freshly": "fresh", "fruity": "fruit", "smelling": "smell", "scented": "scent", "floral": "flower", "flowers": "flower", "cleanliness": "clean", "cleaning": "clean"}
-
     words = re.findall(r'\b[a-zà-ÿ]{2,}\b', str(text).lower())
 
     tokens = []
@@ -226,45 +177,61 @@ def generate_word_cloud(text_series, palette, shape):
     return fig
 
 def generate_word_tree_advanced(text_series, min_freq, palette):
-    """Advanced Word Tree with community blobs and weighted edges (thickness)."""
+    """Full stylised Word Tree: Font size by freq, Thickness by strength, Community hulls."""
     valid = [t for t in text_series if len(str(t).split()) > 0]
     if not valid: return None
     try:
         vec = CountVectorizer(min_df=min_freq, token_pattern=r"(?u)\b\S+\b")
-        mtx = vec.fit_transform(valid); words = vec.get_feature_names_out()
+        mtx = vec.fit_transform(valid)
+        words = vec.get_feature_names_out()
+        word_counts = np.asarray(mtx.sum(axis=0)).flatten()
+        count_dict = dict(zip(words, word_counts))
         if len(words) < 2: return None
         
-        # Co-occurrence matrix logic
         adj = (mtx.T * mtx); adj.setdiag(0)
         G = nx.from_scipy_sparse_array(adj)
         G = nx.relabel_nodes(G, {i: w for i, w in enumerate(words)})
-        
-        # Community detection for coloring clusters
         partition = community_louvain.best_partition(G)
         
-        fig, ax = plt.subplots(figsize=(12, 9))
-        pos = nx.spring_layout(G, k=0.5, seed=42)
+        fig, ax = plt.subplots(figsize=(14, 10), facecolor='white')
+        pos = nx.spring_layout(G, k=0.7, seed=42, iterations=100)
         
-        # Line Thickness based on frequency (weight)
-        weights = [G[u][v]['weight'] for u, v in G.edges()]
-        max_w = max(weights) if weights else 1
-        normalized_weights = [(w / max_w) * 6 for w in weights] 
+        cmap = plt.get_cmap(palette)
+        unique_comms = sorted(list(set(partition.values())))
         
-        # Draw community blobs in background
-        for comm in set(partition.values()):
+        # Draw Background Community Hulls
+        for i, comm in enumerate(unique_comms):
             nodes = [n for n in G.nodes() if partition[n] == comm]
-            if len(nodes) > 1:
+            color = cmap(i / max(1, len(unique_comms)-1))
+            if len(nodes) >= 3:
                 pts = np.array([pos[n] for n in nodes])
-                ax.scatter(pts[:,0], pts[:,1], s=8000, alpha=0.1)
+                cent = np.mean(pts, axis=0)
+                pts_padded = pts + 0.15 * (pts - cent) # Expansion
+                hull = ConvexHull(pts_padded)
+                polygon = patches.Polygon(pts_padded[hull.vertices], closed=True, alpha=0.15, color=color, zorder=0)
+                ax.add_patch(polygon)
+            elif len(nodes) > 0:
+                for n in nodes:
+                    circle = plt.Circle(pos[n], 0.12, color=color, alpha=0.1, zorder=0)
+                    ax.add_artist(circle)
 
-        # Draw Graph
-        nx.draw_networkx_edges(G, pos, width=normalized_weights, alpha=0.2, edge_color='gray')
-        nx.draw_networkx_nodes(G, pos, node_size=2500, node_color=list(partition.values()), cmap=palette, alpha=0.9)
-        nx.draw_networkx_labels(G, pos, font_size=9, font_weight='bold')
+        # Draw Edges (Strength)
+        weights = [G[u][v]['weight'] for u, v in G.edges()]
+        if weights:
+            max_w = max(weights)
+            norm_widths = [(w / max_w) * 6 for w in weights]
+            nx.draw_networkx_edges(G, pos, width=norm_widths, alpha=0.25, edge_color='#cccccc', ax=ax)
+
+        # Draw Labels (Size)
+        max_c = max(word_counts)
+        for node, (x, y) in pos.items():
+            fsize = 9 + (count_dict[node] / max_c) * 18
+            ax.text(x, y, node.replace("_", "\n"), fontsize=fsize, ha='center', va='center', fontweight='bold',
+                    bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=0.3), zorder=2)
         
         plt.axis('off')
         return fig
-    except: return None
+    except Exception: return None
 
 def run_fca(df, p_col, fmin, use_tfidf):
     grouped = df.groupby(p_col)['cleaned'].apply(lambda x: " ".join(x))
@@ -283,7 +250,6 @@ def run_fca(df, p_col, fmin, use_tfidf):
 with st.sidebar:
     st.header("⚙️ Settings")
     uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
-    
     dataset_lang = st.selectbox("Language:", list(LANGUAGE_PACKS.keys()))
     
     pack = LANGUAGE_PACKS[dataset_lang]
@@ -319,7 +285,7 @@ with st.sidebar:
     fmin_global = st.slider("Min Word Frequency", 1, 50, 5)
     use_tfidf = st.toggle("Use TF-IDF Weighting", value=True)
     shape_opt = st.radio("Cloud Shape", ["Rectangle", "Round"])
-    palette_opt = st.selectbox("Palette", ["copper", "GnBu", "RdPu", "viridis"])
+    palette_opt = st.selectbox("Palette", ["copper", "GnBu", "RdPu", "viridis", "Spectral"])
 
 tab1, tab2, tab3, tab4, tab6, tab5 = st.tabs(["📊 Single Product", "⚔️ Comparison", "🌐 Factorial Map", "🔍 Topic Lab", "🎯 Impact Lab", "🚫 Exclusions & Grams"])
 
@@ -346,40 +312,16 @@ if uploaded_file and 'df_raw' in locals():
             
             sent_val = product_data[v_col].apply(lambda x: TextBlob(str(x)).sentiment.polarity).mean()
             st.metric(f"Mood: {target_p}", f"{'Positive' if sent_val > 0 else 'Negative'}", f"{round(sent_val*100, 1)}%")
-            st.progress((sent_val + 1) / 2)
             
-            # Layout updated to put tree below wordcloud
-            st.write("### ☁️ Olfactive Wordcloud")
-            st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
-            
-            st.divider()
-            
-            st.write("### 🌳 Advanced Word Tree")
-            st.caption("Lines thickness represents link strength. Colors indicate olfactive territories.")
+            st.write("### 🌳 Olfactive Word Tree")
+            st.caption("Community clusters by color. Word size = Frequency. Link thickness = Strength.")
             tree_fig = generate_word_tree_advanced(p_sub_cleaned, fmin_global, palette_opt)
-            if tree_fig: 
-                st.pyplot(tree_fig)
-            else: 
-                st.warning("Not enough patterns for a tree. Try reducing Min Word Frequency.")
+            if tree_fig: st.pyplot(tree_fig)
+            else: st.warning("Not enough data for tree.")
             
             st.divider()
-            pos_words, neg_words = get_sentiment_words(p_sub_cleaned)
-            sl, sr = st.columns(2)
-            with sl:
-                st.success("✨ **Positive Descriptors**")
-                for w in pos_words: st.write(f"- {w}")
-            with sr:
-                st.error("⚠️ **Negative Descriptors**")
-                for w in neg_words: st.write(f"- {w}")
-            
-            neg_grams, sup_grams = get_gram_categories(p_sub_cleaned, st.session_state.gram_rules['negation_list'], st.session_state.gram_rules['superlative_list'])
-            gl, gr = st.columns(2)
-            with gl:
-                st.warning("🚫 **Negation List**")
-                for g in neg_grams: st.write(f"- {g}")
-            with gr:
-                st.info("💎 **Superlative List**")
-                for g in sup_grams: st.write(f"- {g}")
+            st.write("### ☁️ Classic Wordcloud")
+            st.pyplot(generate_word_cloud(p_sub_cleaned, palette_opt, shape_opt))
 
         with tab2:
             st.subheader("⚔️ Scent Comparison")
@@ -390,7 +332,6 @@ if uploaded_file and 'df_raw' in locals():
             if not d_a.empty and not d_b.empty:
                 sim = float(cosine_similarity(TfidfVectorizer(token_pattern=r"(?u)\b\S+\b").fit_transform([" ".join(d_a), " ".join(d_b)]))[0][1])
                 st.metric("Olfactive Similarity", f"{round(sim*100, 1)}%")
-                st.progress(sim)
                 comp_cols[0].pyplot(generate_word_cloud(d_a, palette_opt, shape_opt))
                 comp_cols[1].pyplot(generate_word_cloud(d_b, palette_opt, shape_opt))
 
@@ -422,8 +363,6 @@ if uploaded_file and 'df_raw' in locals():
                     with cols[i % num_t]:
                         top_words = [fn[j].replace("_", " ") for j in topic.argsort()[-7:]]
                         st.info(f"**Theme {i+1}**\n\n" + ", ".join(top_words))
-                        st.success(f"✅ **Primary:** {df.iloc[doc_topic[:, i].argmax()][p_col]}")
-                        st.error(f"❌ **Outlier:** {df.iloc[doc_topic[:, i].argmin()][p_col]}")
 
         with tab6:
             st.subheader("🎯 Preference Driver Analysis")
@@ -434,51 +373,20 @@ if uploaded_file and 'df_raw' in locals():
                     vec_imp = CountVectorizer(min_df=3, binary=True, token_pattern=r"(?u)\b\S+\b")
                     X_imp, y_imp = vec_imp.fit_transform(df_imp['cleaned']), df_imp[pref_col]
                     model = Ridge(alpha=1.0).fit(X_imp, y_imp)
-                    impact_df = pd.DataFrame({
-                        'Word': [w.replace("_", " ") for w in vec_imp.get_feature_names_out()], 
-                        'Impact': model.coef_
-                    }).sort_values(by='Impact', ascending=False)
-                    pos_impact = impact_df.head(15).iloc[::-1]
-                    neg_impact = impact_df.tail(15)
+                    impact_df = pd.DataFrame({'Word': [w.replace("_", " ") for w in vec_imp.get_feature_names_out()], 'Impact': model.coef_}).sort_values(by='Impact', ascending=False)
                     c1, c2 = st.columns(2)
-                    with c1:
-                        st.write("📈 **Top 15 Positive Drivers**")
-                        fig_p, ax_p = plt.subplots(figsize=(6, 8))
-                        ax_p.barh(pos_impact['Word'], pos_impact['Impact'], color='#2ecc71')
-                        st.pyplot(fig_p)
-                    with c2:
-                        st.write("📉 **Top 15 Negative Drivers**")
-                        fig_n, ax_n = plt.subplots(figsize=(6, 8))
-                        ax_n.barh(neg_impact['Word'], neg_impact['Impact'], color='#e74c3c')
-                        st.pyplot(fig_n)
+                    with c1: st.write("📈 Positive"); st.bar_h(impact_df.head(10)['Word'], impact_df.head(10)['Impact'])
+                    with c2: st.write("📉 Negative"); st.bar_h(impact_df.tail(10)['Word'], impact_df.tail(10)['Impact'])
                 except Exception as e: st.error(f"Error: {e}")
-            else: st.warning("Select Preference Score column.")
 
-with tab5:
-    st.subheader("🚫 Exclusions & Gram Lab")
-    col_left, col_right = st.columns(2)
-    with col_left:
-        stops = st.session_state.get('custom_stop_list', [])
-        txt_stops = st.text_area("Stopwords", value=", ".join(stops), height=150)
-        gn_list = st.text_input("Negation Triggers", ", ".join(st.session_state.gram_rules['negation_list']))
-        gs_list = st.text_input("Superlative Triggers", ", ".join(st.session_state.gram_rules['superlative_list']))
-    with col_right:
-        g = st.session_state.gram_rules
-        p2 = st.text_input("Prefix 2-gram", ", ".join(g['prefix_2g']))
-        s2 = st.text_input("Suffix 2-gram", ", ".join(g['suffix_2g']))
-        p3 = st.text_input("Prefix 3-gram", ", ".join(g['prefix_3g']))
-        a2 = st.text_input("Special 2-gram", ", ".join(g['spec_2g']))
-        a3 = st.text_input("Special 3-gram", ", ".join(g['spec_3g']))
-
-    if st.button("💾 Apply & Re-Process"):
-        st.session_state.custom_stop_list = [x.strip().lower() for x in txt_stops.split(",") if x.strip()]
-        st.session_state.gram_rules = {
-            'prefix_2g': [x.strip().lower() for x in p2.split(",") if x.strip()],
-            'suffix_2g': [x.strip().lower() for x in s2.split(",") if x.strip()],
-            'prefix_3g': [x.strip().lower() for x in p3.split(",") if x.strip()],
-            'spec_2g': [x.strip().lower() for x in a2.split(",") if x.strip()],
-            'spec_3g': [x.strip().lower() for x in a3.split(",") if x.strip()],
-            'negation_list': [x.strip().lower() for x in gn_list.split(",") if x.strip()],
-            'superlative_list': [x.strip().lower() for x in gs_list.split(",") if x.strip()]
-        }
-        st.rerun()
+        with tab5:
+            st.subheader("🚫 Exclusions & Gram Lab")
+            col_left, col_right = st.columns(2)
+            stops = st.session_state.get('custom_stop_list', [])
+            txt_stops = col_left.text_area("Stopwords", value=", ".join(stops), height=150)
+            g = st.session_state.gram_rules
+            p2 = col_right.text_input("Prefix 2-gram", ", ".join(g['prefix_2g']))
+            a2 = col_right.text_input("Special 2-gram", ", ".join(g['spec_2g']))
+            if st.button("💾 Apply & Re-Process"):
+                st.session_state.custom_stop_list = [x.strip().lower() for x in txt_stops.split(",") if x.strip()]
+                st.rerun()
